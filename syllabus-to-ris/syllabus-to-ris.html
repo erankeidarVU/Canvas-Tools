@@ -1,0 +1,1386 @@
+<!doctype html>
+<!--
+  Syllabus to RIS — version 2.1
+  Owner: Eran Keidar (e.keidar@vu.nl), Vrije Universiteit Amsterdam
+  Changelog:
+  1.0 — first working version: paste or upload a syllabus (PDF, Word, text), split it into readings
+        grouped by week, look up DOIs (Crossref) and ISBNs (Google Books, Open Library), review and
+        edit each reading, export RIS for VU Reading Lists (whole list or one file per week)
+  1.1 — lookups no longer fail with "Failed to fetch": one request at a time per service, retries
+        with back-off, a 45-second pause for a service that stays down, OpenAlex added as a second
+        DOI source, each source tried on its own, edition check for books, and a "Search again for
+        amber readings" button
+  1.2 — owner contact footer and an in-app README opened from the footer; neutral example list and
+        tips for lecturers; organisations (e.g. United Nations) kept as one author
+  1.3 — RIS export follows Talis Aspire's own field mapping: "Document" is written as ABST
+        (GEN made Talis reject the record), ignored tags (KW, JO, T3, CY) dropped, editors of
+        whole books as ED; optional U1 importance for required and optional readings; choice to
+        leave the week out of the student-visible note; import steps corrected (import straight
+        into a new list, sections can't be imported, 300 readings per file)
+  1.4 — three importance levels matching VU Reading Lists (Required reading, Recommended reading,
+        Optional) read from the syllabus: label at the start of a reading, a [tag] in it, or a group
+        heading such as "Required readings"; English and Dutch words; default level for unlabelled
+        readings; importance menu on each reading. Sections also from "Section:/Theme:" lines and
+        Markdown headings. README explains how to mark both.
+  1.5 — readings without a DOI or ISBN (working papers, reports, policy briefs) now get a web link
+        from OpenAlex when it has one, instead of being dropped; amber readings get a "Paste a link,
+        DOI or ISBN" field for anything found elsewhere, e.g. in Google Scholar; journal page
+        numbers with a letter (S95–S120) recognised
+  1.6 — links are found automatically more often: OpenAlex is searched by title first (free-text
+        search buried grey literature among loose matches), and a paper without a DOI is accepted
+        when OpenAlex lists it up to 3 years later (reissued working papers). Google Books' shared
+        daily limit is detected and skipped at once. Optional personal OpenAlex API key, because
+        the free allowance is shared per network.
+  1.7 — looks for the full text, not just any link: open-access copies from OpenAlex first; for a
+        dead PDF address, the copy saved by the Internet Archive (Wayback Machine); a record page
+        only as a last resort, clearly labelled, with a field to replace it. With an email address,
+        readings with a DOI also get a free full-text link from Unpaywall when one exists.
+  1.8 — readings with no DOI, ISBN or link get a Google Scholar search link (exact title plus first
+        author), so students can still find them; on by default, can be turned off under Import
+        settings.
+  1.9 — section headings are written as Talis paragraphs (TY - NOTE) above each section's readings,
+        so an import into a new list arrives in order with its week headings; stricter matching (the
+        start of the title must match, so another paper by the same author on a similar topic is only
+        offered as a possible match); "CHAPTER 2." prefixes removed from database titles; a book
+        title that repeats the chapter title is ignored.
+  2.0 — importance labels set to VU Reading Lists' exact wording, confirmed from a list exported
+        from VU Reading Lists: Required reading, Recommended reading, Optional reading (the third was
+        "Optional", which didn't match); book reviews are never matched to the book itself.
+  2.1 — "Set for all unmarked" in the check step gives every reading without importance the chosen
+        level in one click (replaces the default setting under Import settings).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Syllabus to RIS</title>
+<meta name="author" content="Eran Keidar, e.keidar@vu.nl">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: one reading column; three stacked steps; readings grouped under their week, each a card with a status stripe */
+:root{
+  --paper:#f3f5f7; --surface:#ffffff; --sunken:#eaeef2; --ink:#18212b; --muted:#5a6573; --line:#d6dde4;
+  --accent:#0b6477; --accent-ink:#ffffff; --accent-soft:#dfeef1;
+  --ok:#1d7447; --ok-soft:#e1f1e8; --web:#2b5aa8; --web-soft:#e5ecf8; --warn:#985a00; --warn-soft:#fbefd9; --bad:#a3271f;
+  --f-display:"Newsreader", Georgia, "Times New Roman", serif;
+  --f-body:"Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#10151b; --surface:#171f28; --sunken:#0c1116; --ink:#e5eaf0; --muted:#9aa6b4; --line:#2b3541;
+    --accent:#5fc1d4; --accent-ink:#06232a; --accent-soft:#143842;
+    --ok:#62cb93; --ok-soft:#14352a; --web:#94b6f2; --web-soft:#1a2a44; --warn:#f1b65c; --warn-soft:#3a2b12; --bad:#f08a80;
+    color-scheme: dark;
+  }
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 var(--f-body)}
+.wrap{max-width:980px;margin:0 auto;padding-block:36px 72px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));display:flex;flex-direction:column;gap:28px}
+h1,h2,h3{font-family:var(--f-display);font-weight:600;line-height:1.15;text-wrap:balance;margin:0}
+h1{font-size:clamp(1.9rem,4vw,2.6rem);letter-spacing:-.01em}
+h2{font-size:1.35rem}
+.lede{color:var(--muted);max-width:62ch;margin:8px 0 0}
+.steps{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:16px;padding:0;list-style:none;font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.steps li{display:flex;gap:8px;align-items:center}
+.steps b{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--sunken);color:var(--ink);font-weight:600;font-size:.75rem}
+.steps li.on b{background:var(--accent);color:var(--accent-ink)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:22px clamp(16px,3vw,28px);display:flex;flex-direction:column;gap:16px}
+.panel-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 16px}
+.eyebrow{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:600}
+.muted{color:var(--muted)}
+.small{font-size:.85rem}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+.tab{appearance:none;border:0;background:none;font:inherit;color:var(--muted);padding:8px 12px;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+textarea,input[type=text],input[type=email],select{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
+textarea{font-family:var(--f-mono);font-size:12.5px;line-height:1.5;min-height:300px;resize:vertical}
+textarea:focus,input:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.drop{border:1.5px dashed var(--line);border-radius:8px;padding:36px 16px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center;background:var(--sunken)}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.grow{flex:1 1 auto}
+.btn{appearance:none;font:inherit;font-weight:600;border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 14px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn.sm{font-size:.8rem;padding:4px 9px;font-weight:500}
+.linkbtn{appearance:none;border:0;background:none;color:var(--accent);font:inherit;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+a{color:var(--accent)}
+details.opts summary{cursor:pointer;color:var(--muted);font-size:.9rem}
+.opts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:10px}
+label.fld{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted);min-width:0}
+label.chk{display:flex;gap:8px;align-items:center;font-size:.9rem}
+.example-note{font-size:.8rem;color:var(--warn);background:var(--warn-soft);border-radius:6px;padding:6px 10px}
+/* summary */
+.summary{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.count{font-size:.82rem;padding:3px 10px;border-radius:999px;background:var(--sunken);font-variant-numeric:tabular-nums}
+.count.doi,.count.isbn{background:var(--ok-soft);color:var(--ok)}
+.count.web{background:var(--web-soft);color:var(--web)}
+.count.check{background:var(--warn-soft);color:var(--warn)}
+.bar{height:4px;background:var(--sunken);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+/* sections and items */
+.section{display:flex;flex-direction:column;gap:10px}
+.section-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-top:6px}
+.section-head input{font-family:var(--f-display);font-size:1.15rem;font-weight:600;border-color:transparent;background:transparent;padding:4px 6px;flex:1 1 260px}
+.section-head input:hover{border-color:var(--line)}
+.item{border:1px solid var(--line);border-left:4px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:var(--surface);min-width:0}
+.item.st-doi,.item.st-isbn{border-left-color:var(--ok)}
+.item.st-web{border-left-color:var(--web)}
+.item.st-check{border-left-color:var(--warn)}
+.item.st-busy{border-left-color:var(--accent)}
+.item-top{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pill{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border-radius:4px;background:var(--sunken);color:var(--muted)}
+.st-doi .pill,.st-isbn .pill{background:var(--ok-soft);color:var(--ok)}
+.st-web .pill{background:var(--web-soft);color:var(--web)}
+.st-check .pill{background:var(--warn-soft);color:var(--warn)}
+.st-busy .pill{background:var(--accent-soft);color:var(--accent)}
+.item-top select{width:auto;padding:3px 6px;font-size:.82rem}
+.item-top label.chk{font-size:.82rem}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.cite{margin:0;overflow-wrap:anywhere}
+.cite .ttl{font-family:var(--f-display);font-size:1.06rem;font-weight:500}
+.ids{margin:0;font-family:var(--f-mono);font-size:.78rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px;overflow-wrap:anywhere}
+.ids span b{font-weight:500;color:var(--ink)}
+.msg{margin:0;font-size:.84rem;color:var(--muted)}
+.st-check .msg{color:var(--warn)}
+.sugg{background:var(--warn-soft);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:.88rem}
+.quick input{max-width:620px}
+.bulk{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;background:var(--sunken);border-radius:8px;padding:10px 12px;font-size:.9rem}
+.bulk select{width:auto}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.edit{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;padding-top:6px;border-top:1px dashed var(--line)}
+.edit .wide{grid-column:1/-1}
+.edit textarea{min-height:70px}
+.raw{font-family:var(--f-mono);font-size:.76rem;color:var(--muted);margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+details.orig summary{font-size:.78rem;color:var(--muted);cursor:pointer;width:max-content}
+.hidden-ok .item.st-doi,.hidden-ok .item.st-isbn,.hidden-ok .item.st-web{display:none}
+/* export */
+.files{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.files>div{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--line)}
+.files>div:first-child{border-top:0;background:var(--sunken)}
+.files .n{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.85rem}
+pre.ris{font-family:var(--f-mono);font-size:12px;line-height:1.5;background:var(--sunken);border-radius:8px;padding:14px;max-height:340px;overflow:auto;margin:0}
+ol.howto{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:6px;max-width:68ch}
+footer{color:var(--muted);font-size:12px;line-height:1.6;text-align:center;margin-top:4px}
+footer a{color:var(--accent)}
+.readme-overlay{position:fixed;inset:0;z-index:50;background:rgba(10,16,22,.55);display:flex;align-items:center;justify-content:center;padding:calc(16px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px))}
+.readme-box{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;width:100%;max-width:760px;max-height:100%;display:flex;flex-direction:column;overflow:hidden}
+.readme-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600}
+.readme-body{padding:18px 22px 24px;overflow-y:auto;font-size:14px;line-height:1.6}
+.readme-body h3{font-family:var(--f-body);font-size:.95rem;color:var(--accent);margin:18px 0 6px}
+.readme-body h3:first-child{margin-top:0}
+.readme-body p,.readme-body ul,.readme-body ol{margin:6px 0}
+.readme-body li{margin-bottom:4px}
+.readme-body code{font-family:var(--f-mono);font-size:12.5px;background:var(--sunken);padding:1px 5px;border-radius:4px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom, 0px));background:var(--ink);color:var(--paper);padding:8px 16px;border-radius:6px;font-size:.88rem;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Syllabus to RIS</h1>
+  <p class="lede">Paste or upload your course syllabus. Each reading is matched to its DOI or ISBN where one exists, grouped by week, and downloaded as a RIS file you can import into VU Reading Lists.</p>
+  <ol class="steps" id="steps">
+    <li class="on" data-s="1"><b>1</b>Syllabus</li>
+    <li data-s="2"><b>2</b>Check readings</li>
+    <li data-s="3"><b>3</b>Download &amp; import</li>
+  </ol>
+</header>
+
+<section class="panel" id="p-input" aria-labelledby="h-input">
+  <div class="panel-head">
+    <h2 id="h-input">Your syllabus</h2>
+    <div class="row small">
+      <button class="linkbtn" id="loadExample" type="button">Load example</button>
+      <span class="muted">·</span>
+      <button class="linkbtn" id="clearText" type="button">Clear</button>
+    </div>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" id="tab-paste" type="button">Paste text</button>
+    <button class="tab" role="tab" aria-selected="false" id="tab-upload" type="button">Upload file</button>
+  </div>
+  <div id="pane-paste" class="row" style="flex-direction:column;align-items:stretch;gap:8px">
+    <p class="example-note" id="exampleNote" hidden>Example loaded: a short reading list showing the ways to mark sections and importance. Replace it with your own syllabus.</p>
+    <label class="fld" for="src" style="font-size:.85rem">Copy the reading list (or the whole syllabus) and paste it here. Week headings are kept as sections.</label>
+    <textarea id="src" spellcheck="false" placeholder="Paste your reading list here, for example:
+
+Week 1: Introduction
+Required: Author, A. (2020). Title of the article. Journal Name, 12(3), 45–67.
+Optional: Author, B. (2018). Title of the book. Publisher.
+
+Week 2: Next topic
+Recommended readings
+Author, C. (2015). Title of the chapter. In D. Editor (Ed.), Title of the book (pp. 10–30). Publisher. (PDF in Canvas)
+Author, E. (2021). Title of the report. Organisation. https://example.org/report [optional]"></textarea>
+    <details class="opts">
+      <summary>Tips for the best results</summary>
+      <ul class="small muted" style="margin:8px 0 0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px">
+        <li><b>Sections:</b> put each heading on its own line, e.g. &ldquo;Week 2: Social capital&rdquo;, &ldquo;Session 3&rdquo;, &ldquo;Section: Theories of capital&rdquo; or &ldquo;## Global goals&rdquo;.</li>
+        <li><b>Importance for one reading:</b> start it with &ldquo;Required:&rdquo;, &ldquo;Recommended:&rdquo; or &ldquo;Optional:&rdquo;, or add [required], [recommended] or [optional] anywhere in it.</li>
+        <li><b>Importance for a group:</b> put &ldquo;Required readings&rdquo;, &ldquo;Recommended readings&rdquo; or &ldquo;Further reading&rdquo; on its own line. It applies to the readings below it, up to the next heading.</li>
+        <li>Include a DOI or web link when you have one. It is used as given.</li>
+        <li>Notes in brackets, such as &ldquo;(PDF in Canvas)&rdquo; or &ldquo;(25 pages)&rdquo;, are kept as notes for students.</li>
+        <li>Any common citation style works (APA, Harvard, Chicago). Each reading should start with the author&rsquo;s name.</li>
+        <li>You can paste the whole syllabus. Lines that aren&rsquo;t references are skipped, and you can remove anything left over in the next step.</li>
+      </ul>
+    </details>
+  </div>
+  <div id="pane-upload" hidden>
+    <div class="drop" id="drop">
+      <strong>Drop a PDF, Word (.docx) or text file here</strong>
+      <span class="muted small">The text is read in your browser. Nothing is uploaded to a server.</span>
+      <label class="btn" for="file">Choose a file</label>
+      <input type="file" id="file" accept=".pdf,.docx,.txt,.md,.text" hidden>
+      <span class="small" id="fileStatus"></span>
+    </div>
+  </div>
+  <div class="opts-grid">
+    <label class="fld" for="email">Your email address (recommended). Crossref and OpenAlex answer faster and more reliably when it's included. It's only sent to them.
+      <input type="email" id="email" placeholder="name@vu.nl" autocomplete="email">
+    </label>
+    <label class="chk"><input type="checkbox" id="doLookup" checked> Find missing DOIs, ISBNs and links online</label>
+  </div>
+  <details class="opts">
+    <summary>OpenAlex API key (optional)</summary>
+    <div class="opts-grid">
+      <label class="fld" for="oaKey" style="grid-column:1/-1">OpenAlex shares one small free daily allowance between everyone on the same network, such as the VU network. If searches start failing, get a free personal key at openalex.org/settings/api and paste it here. It&rsquo;s kept only in this browser.
+        <input type="text" id="oaKey" autocomplete="off" spellcheck="false" placeholder="Leave empty to use the shared allowance">
+      </label>
+    </div>
+  </details>
+  <div class="row">
+    <button class="btn primary" id="go" type="button">Find readings</button>
+    <span class="muted small" id="goNote"></span>
+  </div>
+</section>
+
+<section class="panel" id="p-review" hidden aria-labelledby="h-review">
+  <div class="panel-head">
+    <h2 id="h-review">Check readings</h2>
+    <div class="row">
+      <button class="btn sm" id="retryAll" type="button">Search again for amber readings</button>
+      <label class="chk small"><input type="checkbox" id="onlyCheck"> Show only readings that need a look</label>
+    </div>
+  </div>
+  <div class="summary" id="summary"></div>
+  <div class="bulk" id="bulkImp">
+    <span id="bulkCount">Readings without importance</span>
+    <label class="sr" for="bulkLevel">Importance to set</label>
+    <select id="bulkLevel">
+      <option value="required">Required reading</option>
+      <option value="recommended">Recommended reading</option>
+      <option value="optional">Optional reading</option>
+    </select>
+    <button class="btn sm" id="bulkApply" type="button">Set for all unmarked</button>
+  </div>
+  <div class="bar" aria-hidden="true"><i id="progress"></i></div>
+  <p class="muted small" style="margin:0">Green readings have a DOI or ISBN, so the library can link them to its holdings. Blue ones import as web pages. Amber ones need you to check the details or paste an identifier. Use <em>Edit</em> to change anything.</p>
+  <div id="review" style="display:flex;flex-direction:column;gap:22px"></div>
+</section>
+
+<section class="panel" id="p-export" hidden aria-labelledby="h-export">
+  <div class="panel-head">
+    <h2 id="h-export">Download &amp; import</h2>
+    <button class="btn sm" id="copyRis" type="button">Copy RIS text</button>
+  </div>
+  <div class="files" id="files"></div>
+  <details class="opts">
+    <summary>Import settings</summary>
+    <div class="opts-grid">
+      <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="headings" checked> Add each section heading to the list as a paragraph, above its readings (works when you import into a new list)</label>
+      <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="scholarFallback" checked> When a reading has no DOI, ISBN or link, link it to a Google Scholar search for its title and author</label>
+      <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="weekInNote" checked> Add the section to each reading&rsquo;s note (helps you sort readings into sections; students can see notes)</label>
+      <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="writeImp" checked> Set the importance level in VU Reading Lists</label>
+      <label class="fld" for="labRequired">Label for required readings
+        <input type="text" id="labRequired" value="Required reading">
+      </label>
+      <label class="fld" for="labRecommended">Label for recommended readings
+        <input type="text" id="labRecommended" value="Recommended reading">
+      </label>
+      <label class="fld" for="labOptional">Label for optional readings
+        <input type="text" id="labOptional" value="Optional reading">
+      </label>
+      <p class="small muted" style="margin:0;grid-column:1/-1">These are VU Reading Lists&rsquo; exact labels (Required reading, Recommended reading, Optional reading). They must match exactly, so only change them if VU changes its wording. When importance isn&rsquo;t set this way, the level is added to the note instead.</p>
+    </div>
+  </details>
+  <div>
+    <p class="eyebrow" style="margin:0 0 8px">Import into VU Reading Lists</p>
+    <ol class="howto">
+      <li>Sign in to VU Reading Lists and open <strong>My Bookmarks</strong>. Choose <strong>Add</strong> &rarr; <strong>Import citations</strong> and select the .ris file. You can import straight into a new list, or into My Bookmarks and add the readings to an existing list later.</li>
+      <li>Import straight into a <strong>new list</strong>: the readings keep their order, and each week heading appears as a paragraph above its readings.</li>
+      <li>The import can&rsquo;t create real sections. To add them, use <strong>Add section</strong> at each heading paragraph and move that week&rsquo;s readings into it.</li>
+      <li>Readings with a DOI or ISBN are matched to the library&rsquo;s holdings. Their details may be updated from the catalogue after import.</li>
+      <li>For readings marked &ldquo;PDF in Canvas&rdquo;, upload the file or request a digitisation from the list item. A file can hold up to 300 readings.</li>
+    </ol>
+  </div>
+  <details>
+    <summary class="small muted" style="cursor:pointer">Preview the RIS file</summary>
+    <pre class="ris" id="risPreview"></pre>
+  </details>
+</section>
+
+<footer>Syllabus to RIS v2.1 — runs in your browser; your syllabus file is never uploaded. Only the titles, authors and DOIs of your readings are sent to Crossref, OpenAlex, Unpaywall, the Internet Archive, Google Books and Open Library to find identifiers and full-text links.<br><a href="#" id="readmeLink">Read the README</a> · Questions, or want a change to this tool? Contact <a href="mailto:e.keidar@vu.nl">Eran Keidar</a>.</footer>
+</div>
+
+<div id="readmeOverlay" class="readme-overlay" role="dialog" aria-modal="true" aria-labelledby="readmeTitle" hidden>
+  <div class="readme-box">
+    <div class="readme-head">
+      <span id="readmeTitle">README — Syllabus to RIS</span>
+      <button id="readmeClose" class="btn sm" type="button" aria-label="Close">&times; Close</button>
+    </div>
+    <div class="readme-body">
+
+<h3>What this does</h3>
+<p>Turns a course syllabus into a RIS file for VU Reading Lists. It splits the syllabus into separate readings, keeps the week headings as sections, finds a DOI or ISBN for each reading where one exists, and lets you check everything before you download the file.</p>
+
+<h3>Basic steps</h3>
+<ol>
+<li>Paste the reading list (or the whole syllabus), or upload a PDF, Word (.docx) or text file.</li>
+<li>Fill in your email address. Crossref and OpenAlex answer faster and more reliably when it's included.</li>
+<li>Click <b>Find readings</b> and wait for the searches to finish (about 1–3 minutes for 20–30 readings).</li>
+<li>Check the readings marked amber. Accept or reject suggested matches, or paste a DOI or ISBN under <b>Edit</b>.</li>
+<li>Download the .ris file for the whole list, or one file per week.</li>
+</ol>
+
+<h3>What the colours mean</h3>
+<ul>
+<li><b>Green (DOI / ISBN)</b>: identified, so the library can link the reading to its holdings.</li>
+<li><b>Blue (Web link)</b>: imports as a web page or report.</li>
+<li><b>Amber (Needs a look)</b>: no identifier found, or an uncertain match (for example a different edition) for you to accept or reject.</li>
+</ul>
+
+<h3>Marking sections and importance in your syllabus</h3>
+<p>VU Reading Lists has three importance levels: <b>Required reading</b>, <b>Recommended reading</b> and <b>Optional reading</b>. The tool reads them from the syllabus in any of these ways:</p>
+<ul>
+<li><b>One reading:</b> start it with a label, e.g. <code>Required: Putnam, R. D. (1995)…</code>, <code>Recommended: …</code>, <code>Optional: …</code> or <code>Further reading: …</code>.</li>
+<li><b>One reading, label at the end:</b> add a tag in brackets anywhere in it, e.g. <code>… Verso. [optional]</code> or <code>(recommended)</code>.</li>
+<li><b>A group of readings:</b> put a heading on its own line, e.g. <code>Required readings</code>, <code>Recommended reading</code>, <code>Further reading</code> or <code>Optional literature</code>. It applies to the readings below it until the next section or group heading.</li>
+<li><b>Other words:</b> Essential, Core, Compulsory and Mandatory count as required; Suggested as recommended; Further, Additional, Background and Extra reading as optional. Dutch also works: <code>Verplicht</code>, <code>Aanbevolen</code>, <code>Optioneel</code>.</li>
+<li><b>Unlabelled readings:</b> in the check step, use <b>Set for all unmarked</b> to give every reading without importance the same level in one click, for example Required reading. You can still change single readings with the menu on their card.</li>
+</ul>
+<p><b>Sections</b> come from headings on their own line:</p>
+<ul>
+<li>Numbered sessions: <code>Week 2: Social capital</code>, <code>Session 3</code>, <code>Lecture 4</code>, <code>Seminar 1</code>, <code>College 5</code>.</li>
+<li>Themes: <code>Section: Theories of capital</code>, <code>Theme: …</code>, or a Markdown heading such as <code>## Global goals</code>.</li>
+</ul>
+<p><b>Example</b> (click <b>Load example</b> above the text box to try it):</p>
+<pre style="font-family:var(--f-mono);font-size:12px;line-height:1.5;background:var(--sunken);border-radius:6px;padding:10px 12px;overflow-x:auto;white-space:pre">Week 1: Introduction
+<b>Required:</b> Putnam, R. D. (1995). Bowling alone… Journal of Democracy, 6(1), 65–78.
+<b>Recommended:</b> Granovetter, M. S. (1973). The strength of weak ties…
+<b>Optional:</b> Anderson, B. (2006). Imagined Communities… Verso.
+
+Week 2: Forms of capital
+<b>Required readings</b>
+Bourdieu, P. (1986). The forms of capital. In J. Richardson (Ed.)…
+Coleman, J. S. (1988). Social capital in the creation of human capital…
+<b>Further reading</b>
+Lin, N. (2001). Social Capital… Cambridge University Press.
+
+Week 3: Global goals
+United Nations (2015). Transforming our world… https://sdgs.un.org/2030agenda <b>[recommended]</b></pre>
+<p>Result: Putnam, Bourdieu and Coleman are <b>Required reading</b>; Granovetter and the United Nations report are <b>Recommended reading</b>; Anderson and Lin are <b>Optional reading</b>. Each lands in its week.</p>
+<p>VU Reading Lists can't import real sections. The tool keeps them in three ways: each section heading is added as a paragraph above its readings, each reading's note starts with its section, and you can download one file per section.</p>
+<p>You can change the importance of any reading in the check step, using the menu on its card.</p>
+
+<h3>Other tips for the best results</h3>
+<ul>
+<li>Include a DOI or web link when you have one; it's used as given. Library proxy links are converted to normal <code>doi.org</code> links.</li>
+<li>Notes in brackets, such as <code>(PDF in Canvas)</code> or <code>(25 pages)</code>, are kept as notes for students.</li>
+<li>Any common citation style works (APA, Harvard, Chicago). Each reading should start with the author's name.</li>
+</ul>
+
+<h3>Importing into VU Reading Lists</h3>
+<ol>
+<li>Sign in to VU Reading Lists and open <b>My Bookmarks</b>. Choose <b>Add → Import citations</b> and select the .ris file. You can import straight into a new list, or into My Bookmarks.</li>
+<li>Import into a <b>new list</b> to keep the order: each week heading appears as a paragraph above its readings.</li>
+<li>The import can't create real sections. To add them, use <b>Add section</b> at each heading paragraph and move that week's readings into it.</li>
+<li>Readings with a DOI or ISBN are matched to the library's holdings, and their details may be updated from the catalogue.</li>
+<li>The importance level is set on import, using VU Reading Lists' exact labels: Required reading, Recommended reading and Optional reading. Notes become notes for students; you can leave the section out of them.</li>
+<li>For readings marked "PDF in Canvas", upload the file or request a digitisation from the list item.</li>
+</ol>
+
+<h3>How links to the full text are found</h3>
+<ul>
+<li><b>Readings with a DOI or ISBN</b> link to the library's holdings. With your email address filled in, the tool also asks Unpaywall for a free, legal full-text copy and adds it as a second link.</li>
+<li><b>Readings without a DOI or ISBN</b> (working papers, reports, policy briefs) are looked up in OpenAlex. The tool then picks, in this order:
+  <ol>
+  <li>an open full-text copy;</li>
+  <li>a copy of the original PDF saved by the Internet Archive, when the original address may no longer work;</li>
+  <li>a PDF link it couldn't check;</li>
+  <li>a record page, which may not include the full text.</li>
+  </ol></li>
+<li>Each reading shows which kind of link it has. For a PDF link or record page, a <b>Replace with a better link</b> field appears so you can paste a better one.</li>
+<li>Google Scholar can't be searched automatically. If the tool finds nothing, the reading gets a <b>Google Scholar search link</b> for its exact title and first author, so students land on the search results. You can turn this off under <b>Import settings</b>, or paste a direct link instead, which is better for students.</li>
+</ul>
+
+<h3>Good to know</h3>
+<ul>
+<li>OpenAlex shares one small free daily allowance between everyone on the same network, such as the VU network. If its searches start failing, add a free personal key under <b>OpenAlex API key</b>. Google Books also has a shared daily limit; when it's reached, the tool uses Open Library instead.</li>
+<li>The free lookup services limit how many searches they accept per minute, so searches are paced. If a reading shows "Couldn't reach …", wait a minute and click <b>Search again for amber readings</b>.</li>
+<li>ISBNs from Google Books or Open Library are the best match for the year in the syllabus. Check it's the edition students should use.</li>
+<li>Working papers, reports, policy briefs and dissertation summaries often have no DOI or ISBN. The tool then looks them up in OpenAlex, which lists many of them with a web link, and adds that link. Google Scholar can't be searched automatically, so if OpenAlex doesn't have it, you can copy a link from Google Scholar into the <b>Paste a link, DOI or ISBN</b> field on an amber reading. With a link, the reading imports as a report or web page.</li>
+</ul>
+
+<h3>Privacy</h3>
+<p>The tool runs in your browser and your syllabus file is never uploaded. It needs an internet connection. To find identifiers and full-text links, it sends the title, authors and DOI of each reading to Crossref, OpenAlex, Google Books, Open Library, Unpaywall and the Internet Archive. If you fill in your email address, it goes to Crossref, OpenAlex and Unpaywall. Fonts and the PDF and Word readers are loaded from Google Fonts and cdnjs. Nothing is stored or sent anywhere else.</p>
+
+<h3>Questions or changes</h3>
+<p>Contact Eran Keidar at <a href="mailto:e.keidar@vu.nl">e.keidar@vu.nl</a>.</p>
+
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="text/plain" id="sample">Week 1: Introduction
+Required: Putnam, R. D. (1995). Bowling alone: America's declining social capital. Journal of Democracy, 6(1), 65–78.
+Recommended: Granovetter, M. S. (1973). The strength of weak ties. American Journal of Sociology, 78(6), 1360–1380.
+Optional: Anderson, B. (2006). Imagined Communities: Reflections on the Origin and Spread of Nationalism. Verso. Introduction (12 pages)
+
+Week 2: Forms of capital
+Required readings
+Bourdieu, P. (1986). The forms of capital. In J. Richardson (Ed.), Handbook of Theory and Research for the Sociology of Education (pp. 241–258). Greenwood. (PDF in Canvas)
+Coleman, J. S. (1988). Social capital in the creation of human capital. American Journal of Sociology, 94, S95–S120.
+Further reading
+Lin, N. (2001). Social Capital: A Theory of Social Structure and Action. Cambridge University Press.
+
+Week 3: Global goals
+United Nations (2015). Transforming our world: the 2030 Agenda for Sustainable Development. https://sdgs.un.org/2030agenda [recommended]
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+"use strict";
+// PARSER-START
+let uid = 0;
+const PART = "(?:(?:[Vv]an|[Vv]on|[Dd]e|[Dd]er|[Dd]en|[Dd]u|[Dd]a|[Dd]i|[Dd]el|[Ll]a|[Ll]e|[Ee]l|[Aa]l|[Tt]en|[Tt]er|[Bb]in|[Ii]bn)\\s+)*";
+const NM = "\\p{Lu}[\\p{L}'’\\-]+";
+const LNM = "\\p{Lu}[\\p{Ll}'’\\-]+";
+const AUTHOR_START = new RegExp("^" + PART + NM + "(?:\\s" + NM + ")?(?:\\s(?:Jr|Sr)\\.?)?(?:,\\s*(?:\\p{Lu}\\.|" + LNM + "\\s*\\(\\s*(?:19|20)\\d{2}|" + LNM + "\\s+\\p{Lu}\\.|" + LNM + ",)|\\s\\p{Lu}{1,3}(?=[,.(\\s]))", "u");
+const BULLET_RE = /^\s*(?:[•●▪◦‣∙·*–—-]|\(?\d{1,2}[.)])\s+/;
+// Importance words lecturers use, mapped to VU Reading Lists' three levels.
+const IMP_WORDS = "required|compulsory|mandatory|obligatory|essential|core|verplicht|recommended|suggested|aanbevolen|optional|optioneel|facultatief|further reading|additional reading|extra reading|background reading|background|further";
+const IMP_PREFIX_RE = new RegExp("^(" + IMP_WORDS + ")\\b[^:]{0,60}:\\s*", "i");
+const IMP_TAG_RE = new RegExp("[\\[(]\\s*(" + IMP_WORDS + ")\\s*[\\])]", "i");
+function impOf(word) {
+  const w = (word || "").toLowerCase();
+  if (/^(required|compulsory|mandatory|obligatory|essential|core|verplicht)/.test(w)) return "required";
+  if (/^(recommended|suggested|aanbevolen)/.test(w)) return "recommended";
+  return "optional";
+}
+const IMP_NAME = { required: "Required reading", recommended: "Recommended reading", optional: "Optional reading" }; // VU Reading Lists' exact labels
+const SECTION_RE = /^(?:week|wk|session|lecture|class|module|topic|unit|seminar|tutorial|meeting|part|block|day|les|college|werkgroep|hoorcollege|bijeenkomst)\s*\.?\s*\d{1,2}[a-z]?\b/i;
+const SECTION_LABEL_RE = /^(?:section|sectie|theme|thema|onderdeel)\s*\d*\s*:\s*(\S.*)$/i;
+const SECTION_MD_RE = /^#{1,3}\s+(\S.*)$/;
+const MODE_RE = /^(required|compulsory|mandatory|obligatory|essential|core|optional|recommended|suggested|further|additional|extra|background|verplichte|aanbevolen|optionele|facultatieve)\s+(readings?|literature|literatuur|materials?|texts?|teksten)\s*:?\s*$/i;
+const SKIP_RE = /^(?:\d{1,3}|page \d+(?: of \d+)?|literature|readings?|reading list|references|bibliography|course literature|literatuur)\s*:?$/i;
+const PART_RE = /[,.]\s*((?:Introduction|Conclusion|Preface|Foreword|Epilogue|Chapters?\s+\d+)(?:\s*\(\d+\s*pages?\))?(?:\s*(?:and|&|,)\s*(?:Introduction|Conclusion|Preface|Epilogue|Chapters?\s+\d+)(?:\s*\(\d+\s*pages?\))?)*)\s*\.?\s*$/i;
+const hasYear = s => /\b(?:19|20)\d{2}\b/.test(s);
+const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+function parseSyllabus(text) {
+  const lines = text.replace(/\r/g, "").split("\n").map(l => l.replace(/ /g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const sections = [], refs = [];
+  let section = null, impMode = "", cur = null;
+  const flush = () => { if (cur) { refs.push(cur); cur = null; } };
+  const newSection = title => { flush(); section = { id: "s" + (++uid), title }; sections.push(section); impMode = ""; };
+  for (let line of lines) {
+    if (SKIP_RE.test(line)) continue;
+    let sm;
+    if ((sm = line.match(SECTION_MD_RE)) && sm[1].length <= 120) { newSection(sm[1].replace(/[:.]\s*$/, "")); continue; }
+    if ((sm = line.match(SECTION_LABEL_RE)) && line.length <= 120 && !hasYear(sm[1])) { newSection(sm[1].replace(/[:.]\s*$/, "")); continue; }
+    if (SECTION_RE.test(line) && line.length <= 120 && !/\(\s*(?:19|20)\d{2}/.test(line)) { newSection(line.replace(/[:.]\s*$/, "")); continue; }
+    const mm = line.match(MODE_RE);
+    if (mm) { flush(); impMode = impOf(mm[1]); continue; }
+    let startsNew = false;
+    if (cur && /[-–]$/.test(cur.text)) { cur.text += line; continue; }
+    const b = line.match(BULLET_RE);
+    if (b) { line = line.slice(b[0].length); startsNew = true; }
+    const pm = line.match(IMP_PREFIX_RE);
+    if (pm && (line.length === pm[0].length || hasYear(line.slice(pm[0].length, pm[0].length + 160)) || AUTHOR_START.test(line.slice(pm[0].length)))) startsNew = true;
+    else if (!cur) startsNew = true;
+    else if (AUTHOR_START.test(line) && (hasYear(cur.text) || /https?:\/\//.test(cur.text))) startsNew = true;
+    if (startsNew) {
+      flush();
+      if (!section) newSection("Readings");
+      cur = { section: section.id, text: line, importance: impMode };
+    } else {
+      cur.text = /[-–]$/.test(cur.text) ? cur.text + line : cur.text + " " + line;
+    }
+  }
+  flush();
+  const out = refs.filter(r => hasYear(r.text) || /https?:\/\//.test(r.text) || r.text.split(" ").length >= 8);
+  return { sections: sections.filter(s => out.some(r => r.section === s.id)), refs: out };
+}
+
+function cleanDoi(d) { return d.replace(/[.,;:)\]}>"'”’]+$/, "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, ""); }
+function findDoi(s) { const m = (s || "").match(/\b10\.\d{4,9}\/[^\s"<>]+/); return m ? cleanDoi(m[0]) : ""; }
+function deproxy(u) {
+  try {
+    const m = u.match(/[?&](?:url|qurl)=([^&]+)/i);
+    if (m && /idm\.oclc\.org|ezproxy|login/i.test(u)) return decodeURIComponent(m[1]);
+    const url = new URL(u);
+    const p = url.hostname.match(/^(.+?)\.(?:[a-z0-9-]+\.)?idm\.oclc\.org$/i) || url.hostname.match(/^(.+?)\.ezproxy\.[a-z0-9.-]+$/i);
+    if (p) { url.hostname = p[1].split(".")[0].replace(/-/g, "."); }
+    return url.toString();
+  } catch (e) { return u; }
+}
+
+function splitAtSentence(s) {
+  const re = /\.\s+/g; let m;
+  while ((m = re.exec(s))) {
+    const before = s.slice(0, m.index);
+    const lastTok = before.split(/\s/).pop().replace(/^[(\[]/, "");
+    if (/^\p{Lu}$/u.test(lastTok) || /^(vol|no|pp|p|eds?|vs|e\.g|i\.e|st|dr|jr|sr|al|sept?|oct|nov|dec|jan|feb|mar|apr|aug)$/i.test(lastTok)) continue;
+    return [before.trim(), s.slice(m.index + m[0].length).trim()];
+  }
+  return [s.replace(/\.\s*$/, "").trim(), ""];
+}
+
+function parseNames(s) {
+  s = (s || "").replace(/\bet al\.?/ig, "").replace(/\((?:eds?|editors?|red)\.?\)/ig, "").replace(/[\s.,(]+$/, "").replace(/^[\s,]+/, "").trim();
+  if (!s) return [];
+  const toks = s.split(/\s*,\s*|\s*;\s*|\s+&\s+|\s+and\s+|\s+en\s+/).map(t => t.replace(/^&\s*|^and\s+/, "").trim()).filter(Boolean);
+  const isInit = t => /^(?:\p{Lu}\.?\s?-?\s?){1,3}$/u.test(t) && /[.]|^\p{Lu}{1,3}$/u.test(t);
+  const isGiven = t => /^\p{Lu}[\p{Ll}'’\-]+(?:\s\p{Lu}\.)?$/u.test(t);
+  const out = [];
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i], nx = toks[i + 1];
+    let m;
+    if (/\b(?:Nations|Bank|Organi[sz]ation|Office|Institute|Agency|Commission|Council|Fund|Programme|Program|Ministry|University|Oxfam|UNESCO|UNICEF|OECD|WHO|Foundation|Network|Association|Group|Centre|Center)\b/.test(t)) { out.push({ family: t, given: "" }); continue; }
+    if (nx && (isInit(nx) || (isGiven(nx) && !/\s/.test(nx) && toks.length % 2 === 0))) { out.push({ family: t, given: nx }); i++; continue; }
+    if ((m = t.match(/^((?:\p{Lu}\.\s?-?)+)\s*(.+)$/u))) { out.push({ family: m[2], given: m[1].trim() }); continue; }
+    if ((m = t.match(/^(.+?)\s((?:\p{Lu}\.?){1,3})$/u)) && !/\s(?:Jr|Sr)$/.test(t)) { out.push({ family: m[1], given: m[2] }); continue; }
+    if ((m = t.match(/^(.+)\s(\S+)$/)) && !/^(?:van|von|de|der|den|el|al|le|la|du)\b/i.test(t) && !/\s(?:Jr|Sr)\.?$/.test(t)) { out.push({ family: m[2], given: m[1] }); continue; }
+    out.push({ family: t, given: "" });
+  }
+  return out.filter(n => n.family && n.family.length > 1);
+}
+
+function findPublisher(s) {
+  s = (s || "").replace(/\(\s*(?:19|20)\d{2}\s*\)\.?/g, "").trim();
+  let m = s.match(/(?:^|[.,]\s*)([\p{Lu}][\p{L} .'-]{1,30}):\s*([^.:,]+?(?:Press|Publishers?|Publishing|Books|Heinemann|Penguin|Routledge|Verso|Zed|Polity|Macmillan|Sage|Wiley|Elsevier|Springer|Nature|Bloomsbury|Allen Lane|Vintage|Norton|Knopf|Pluto)?[^.:,]*?)(?=\s*[.,:]|\s*$)/u);
+  if (m && !/^\d/.test(m[2].trim())) return { place: m[1].trim(), publisher: m[2].trim().replace(/\s+Books$/, " Books") };
+  m = s.match(/((?:[\p{Lu}][\p{L}&' -]*?\s)?(?:Press(?: Books)?|Publishers?|Publishing|Books|Heinemann|Penguin|Routledge|Verso|Zed Books|Polity|Macmillan|Sage|Wiley|Elsevier|Springer(?: Nature)?|Bloomsbury|Pluto|Norton|Brill|Earthscan))\b/u)
+    || s.match(/([\p{Lu}][\p{L}&' -]*?(?:International|Institute|University|Foundation|Bank|Programme|Organisation|Organization))\b/u);
+  return { place: "", publisher: m ? m[1].trim() : "" };
+}
+
+function fixEndPage(sp, ep) {
+  if (sp && ep && ep.length < sp.length && +ep < +sp) return sp.slice(0, sp.length - ep.length) + ep;
+  return ep;
+}
+
+function extractFields(r) {
+  let t = r.text; const notes = []; let importance = r.importance || "";
+  const om = t.match(IMP_PREFIX_RE);
+  if (om) { importance = impOf(om[1]); const p = om[0].match(/\(([^)]+)\)/); if (p) notes.push(cap(p[1].trim())); t = t.slice(om[0].length); }
+  const tg = t.match(IMP_TAG_RE);
+  if (tg) { importance = impOf(tg[1]); t = t.replace(tg[0], " "); }
+  const doi = findDoi(t);
+  const urls = (t.match(/https?:\/\/[^\s<>"]+/g) || []).map(u => u.replace(/[.,;)\]]+$/, ""));
+  t = t.replace(/https?:\/\/[^\s<>"]+/g, " ").replace(/\bdoi:\s*/ig, " ").replace(/\b10\.\d{4,9}\/[^\s"<>]+/g, " ");
+  let url = ""; for (const u of urls) { if (!/10\.\d{4,9}\//.test(u)) { url = deproxy(u); break; } }
+  const linkKind = url ? "syllabus" : "";
+  let isbn = "";
+  const im = t.match(/\bISBN(?:-1[03])?:?\s*([0-9Xx][0-9Xx\-– ]{8,20}[0-9Xx])/i) || t.match(/\b(97[89][\-– ]?(?:\d[\-– ]?){9}\d)\b/);
+  if (im) { const d = im[1].replace(/[^0-9Xx]/g, ""); if (d.length === 10 || d.length === 13) { isbn = d.toUpperCase(); t = t.replace(im[0], " "); } }
+  const part = t.match(PART_RE);
+  if (part) { notes.push("Read: " + part[1].trim()); t = t.slice(0, part.index) + "."; }
+  let chapter = false;
+  t = t.replace(/\(\s*(?:chapter|ch\.)\s*(\d+)\s*\)/ig, (m, n) => { chapter = true; notes.push("Chapter " + n); return " "; });
+  t = t.replace(/\(([^()]*\b(?:pdf|canvas|blackboard|reader|course pack|on reserve|reserve shelf)\b[^()]*)\)/ig, (m, g) => { notes.push(cap(g.trim().replace(/^pdf/i, "PDF"))); return " "; });
+  t = t.replace(/\((\d+)\s*(?:pages?|pp\.?|p\.)\)/ig, (m, g) => { notes.push(g + " pages"); return " "; });
+  t = t.replace(/\s+/g, " ").replace(/\s+([.,;:”’])/g, "$1").replace(/([“‘])\s+/g, "$1").trim();
+  const query = t;
+
+  // year + authors
+  let year = "", authStr = "", rest = t;
+  let ym = t.match(/\(\s*((?:19|20)\d{2})[a-z]?\s*\)/);
+  if (!ym) ym = t.match(/\b((?:19|20)\d{2})[a-z]?\b/);
+  if (ym) year = ym[1];
+  const initialsAuth = () => t.match(/^(.{2,120}?(?:\b\p{Lu}\.\s*){1,3})(?=\s*[\p{Lu}“"‘'])/u);
+  let usedYearSplit = false;
+  if (ym && ym.index <= 120) {
+    const a = t.slice(0, ym.index);
+    if (/\.\s+\p{Lu}\p{Ll}{2,}\s+\p{L}+\s+\p{L}+/u.test(a) && initialsAuth()) {
+      const am = initialsAuth(); authStr = am[1]; rest = t.slice(am[0].length);
+    } else { authStr = a; rest = t.slice(ym.index + ym[0].length); usedYearSplit = true; }
+  } else { const am = initialsAuth(); if (am) { authStr = am[1]; rest = t.slice(am[0].length); } }
+  rest = rest.replace(/^[\s.,:;)]+/, "");
+  const authors = parseNames(authStr);
+
+  // title
+  let title = "", after = "";
+  if (/^[“"‘']/.test(rest)) {
+    const closers = [...rest.matchAll(/[”"’'](?=[.,:;]?\s|[.,:;]?$)/g)].map(m => m.index).filter(i => i > 2);
+    let end = -1;
+    for (const i of closers) { if (rest[i + 1] === ":") continue; if (rest[i - 1] === "s" && rest[i] === "’" && /\w/.test(rest[i + 1] || "")) continue; end = i; break; }
+    if (end > 0) { title = rest.slice(1, end); after = rest.slice(end + 1); }
+    else { [title, after] = splitAtSentence(rest.slice(1)); }
+  } else { [title, after] = splitAtSentence(rest); }
+  const quoted = /^[“"‘']/.test(rest);
+  title = title.replace(/[.,;:\s]+$/, "");
+  if (quoted) title = title.replace(/^[“"‘']|[”"’']$/g, "");
+  title = title.replace(/^“([^”]*)”:/, "$1:").replace(/^([^“]*)”:/, "$1:").trim();
+  after = after.replace(/^[\s.,:;]+/, "").replace(/^\(\s*(?:19|20)\d{2}[a-z]?\s*\)\.?\s*/, "").trim();
+
+  let type = "GEN", container = "", editors = [], volume = "", issue = "", sp = "", ep = "", publisher = "", place = "", series = "";
+  const inM = after.match(/^[Ii]n:?\s+(.*)$/);
+  if (/\b(?:dissertation|thesis|phd|proefschrift)\b/i.test(after + " " + title)) {
+    type = "THES";
+    title = (after ? title + ". " + after : title).replace(/[.\s]*(?:dissertation|thesis|phd)[^.]*\.?\s*$/i, "").replace(/[.\s]+$/, "");
+    after = "";
+  } else if (inM || chapter) {
+    type = "CHAP";
+    let s = inM ? inM[1] : after;
+    const em = s.match(/^(.+?)\s*\((?:eds?|editors?|red)\.?\)\s*,?\s*/i);
+    if (em) { editors = parseNames(em[1]); s = s.slice(em[0].length); }
+    else { const em2 = s.match(/^((?:\p{Lu}\.\s*)+[\p{L}'’\-]+(?:\s[\p{L}'’\-]+)?),\s+/u); if (em2) s = s.slice(em2[0].length); }
+    const pm = s.match(/\(?\s*pp?\.?\s*(\d+)\s*[-–]\s*(\d+)\s*\)?/);
+    if (pm) { sp = pm[1]; ep = pm[2]; s = s.replace(pm[0], " ").replace(/\s+([.,])/g, "$1").replace(/\s+/g, " "); }
+    let [bt, tail] = splitAtSentence(s);
+    const cp = bt.match(/,\s*(\d+)\s*[-–]\s*(\d+)\s*$/);
+    if (cp) { if (!sp) { sp = cp[1]; ep = cp[2]; } bt = bt.slice(0, cp.index); }
+    const tp = (tail || "").match(/:\s*(\d+)\s*[-–]\s*(\d+)/);
+    if (tp && !sp) { sp = tp[1]; ep = tp[2]; tail = tail.replace(tp[0], ""); }
+    if (!tail) { const pub = bt.match(/,\s*([^,]*(?:Press|Publishers?|Publishing|Books|Macmillan|Routledge|Springer(?: Nature)?|Palgrave|Verso|Zed|Polity|Sage|Wiley|Elsevier|Bloomsbury|Pluto|Heinemann)[^,]*)$/); if (pub) { tail = pub[1]; bt = bt.slice(0, pub.index); } }
+    container = bt.replace(/[.,\s]+$/, "");
+    const pp = findPublisher(tail || ""); publisher = pp.publisher; place = pp.place;
+  } else {
+    let src = after, jm = null;
+    const RE1 = /^(.+?)(?:,\s*|\s+)(?:vol(?:ume)?\.?\s*)?(\d+)\s*(?:\(\s*(\d+(?:[-–\/]\d+)?)\s*\)|,?\s*(?:no|issue|nr)\.?\s*(\d+))?\s*[,:]\s*(?:pp?\.?\s*)?([A-Z]?\d+)\s*[-–]\s*([A-Z]?\d+)/i;
+    const RE2 = /^(.+?)(?:,\s*|\s+)vol(?:ume)?\.?\s*(\d+)(?:,?\s*(?:no|issue|nr)\.?\s*(\d+))?/i;
+    const RE3 = /^(.+?),\s*([A-Z]?\d+)\s*[-–]\s*([A-Z]?\d+)\.?\s*$/;
+    if (!src) {
+      const g = title.match(/^(.+?),\s*([^,]+?,\s*(?:vol(?:ume)?\.?\s*)?\d+.*)$/i);
+      if (g && (RE1.test(g[2]) || RE2.test(g[2]))) { title = g[1]; src = g[2]; }
+    }
+    if ((jm = src.match(RE1)) && !/press|publish/i.test(jm[1])) {
+      type = "JOUR"; container = jm[1]; volume = jm[2]; issue = jm[3] || jm[4] || ""; sp = jm[5]; ep = jm[6];
+    } else if ((jm = src.match(RE2))) {
+      type = "JOUR"; container = jm[1]; volume = jm[2]; issue = jm[3] || "";
+    } else if ((jm = src.match(RE3)) && !/press|publish/i.test(jm[1])) {
+      type = "JOUR"; container = jm[1]; sp = jm[2]; ep = jm[3];
+    } else if (/\b(?:policy brief|working paper|programme paper|program paper|discussion paper|research paper|briefing|report|occasional paper)\b/i.test(src + " " + title)) {
+      type = "RPRT"; series = src.replace(/[.\s]+$/, "");
+      const no = title.match(/\s*\((No\.?\s*[^)]+)\)\s*$/i); if (no) { title = title.slice(0, no.index); series = series + (series ? ", " : "") + no[1]; }
+      publisher = findPublisher(src).publisher;
+    } else if (src && /Press|Publishers?|Publishing|Books|Macmillan|Routledge|Verso|Zed|Polity|Sage|Wiley|Heinemann|Penguin|Pluto|Bloomsbury/.test(src)) {
+      type = "BOOK"; const pp = findPublisher(src); publisher = pp.publisher; place = pp.place;
+    } else if (url) {
+      type = "ELEC"; publisher = src.replace(/[.\s]+$/, "");
+    } else if (src) { container = src.replace(/[.\s]+$/, ""); }
+  }
+  if (type === "GEN" && doi) type = "JOUR";
+  if (type === "GEN" && url) type = "ELEC";
+  ep = fixEndPage(sp, ep);
+  container = container.replace(/^[“"‘']|[”"’']$/g, "").trim();
+  return { id: "e" + (++uid), section: r.section, importance, linkKind, ftUrl: "", raw: r.text, query, type, authors, editors, title, container, series, year, volume, issue, sp, ep, publisher, place, isbn, doi, url, notes, status: "new", msg: "", suggestion: null, editing: false };
+}
+// PARSER-END
+
+// ---------- lookups ----------
+const state = { entries: [], sections: [], email: "", oaKey: "", lookup: true, running: 0, total: 0, done: 0, exp: { weekInNote: true, headings: true, scholarFallback: true, writeImp: true, defaultImp: "", labels: { ...IMP_NAME } } };
+const enc = encodeURIComponent;
+const STOP = new Set("the and for with from into that this their about between among through under over upon what when where which while also have been were will your our its his her they them than then there these those does some more most such other only very just introduction chapter".split(" "));
+const norm = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const toks = s => norm(s).split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !STOP.has(w));
+function coverage(a, bNorm) { const t = toks(a); if (!t.length) return 0; return t.filter(w => bNorm.includes(w)).length / t.length; }
+const stripTags = s => (s || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// One request at a time per service, with a pause in between, so the free services don't turn us away.
+const gates = {};
+function gated(host, gapMs, fn) {
+  const run = (gates[host] || Promise.resolve()).then(fn);
+  gates[host] = run.catch(() => {}).then(() => sleep(gapMs));
+  return run;
+}
+const downUntil = {};
+async function getJSON(url, host, gapMs) {
+  host = host || "other";
+  if ((downUntil[host] || 0) > Date.now()) throw new Error(host + " is busy");
+  let last;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await gated(host, gapMs || 300, async () => {
+        const c = new AbortController(); const tm = setTimeout(() => c.abort(), 20000);
+        try {
+          const r = await fetch(url, { signal: c.signal });
+          if (r.status === 404 || r.status === 400) { const err = new Error("not found"); err.final = true; throw err; }
+          if (r.status === 429 && host === "gbooks") { downUntil[host] = Infinity; const err = new Error("daily limit reached"); err.final = true; throw err; }
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return await r.json();
+        } finally { clearTimeout(tm); }
+      });
+    } catch (err) { last = err; if (err.final) throw err; if (attempt < 2) await sleep(2000 * 2 ** attempt); }
+  }
+  downUntil[host] = Date.now() + 45000;
+  throw last;
+}
+const mailto = (sep) => state.email ? sep + "mailto=" + enc(state.email) : "";
+const crGap = () => state.email ? 150 : 1100;
+const cleanQ = q => q.replace(/https?:\/\/\S+/g, " ").replace(/[^\p{L}\p{N}\s'’-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+async function crossrefByDoi(doi) { return (await getJSON("https://api.crossref.org/works/" + enc(doi) + mailto("?"), "crossref", crGap())).message; }
+async function crossrefSearch(q) { return ((await getJSON("https://api.crossref.org/works?rows=6&query.bibliographic=" + enc(cleanQ(q)) + mailto("&"), "crossref", crGap())).message.items) || []; }
+
+const OA_TYPE = { article: "journal-article", "book-chapter": "book-chapter", book: "book", report: "report", dissertation: "dissertation", preprint: "posted-content", review: "journal-article" };
+function fromOpenAlex(w) {
+  const src = (w.primary_location || {}).source || {}; const b = w.biblio || {};
+  return {
+    _src: "OpenAlex",
+    title: [stripTags(w.display_name || w.title || "")],
+    author: (w.authorships || []).map(a => { const n = ((a.author && a.author.display_name) || a.raw_author_name || "").replace(/\s+(Jr\.?|Sr\.?)$/, "").trim(); const i = n.lastIndexOf(" "); return i > 0 ? { given: n.slice(0, i), family: n.slice(i + 1) } : { family: n, given: "" }; }),
+    "container-title": [src.display_name || ""], issued: { "date-parts": [[w.publication_year]] },
+    volume: b.volume || "", issue: b.issue || "", page: [b.first_page, b.last_page].filter(Boolean).join("-"),
+    type: OA_TYPE[w.type] || w.type || "", DOI: (w.doi || "").replace(/^https?:\/\/doi\.org\//i, ""), ISBN: [], publisher: src.host_organization_name || "",
+    _url: oaLink(w), _links: oaLinks(w)
+  };
+}
+// All links OpenAlex knows for a work, open full-text copies first.
+function oaLinks(w) {
+  const out = [], seen = new Set();
+  const push = (u, kind) => { if (!u || !/^https?:\/\//.test(u) || /doi\.org\/|orcid\.org\//i.test(u)) return; const k = u.replace(/^https?:\/\//, "").replace(/\/$/, ""); if (seen.has(k)) return; seen.add(k); out.push({ url: u, kind }); };
+  const locs = [w.best_oa_location, w.primary_location, ...(w.locations || [])].filter(Boolean);
+  for (const l of locs) if (l.is_oa || l === w.best_oa_location) { push(l.pdf_url, "full"); push(l.landing_page_url, "oa-page"); }
+  for (const l of locs) { push(l.pdf_url, "pdf"); if (/\.pdf($|\?)|\$file\//i.test(l.landing_page_url || "")) push(l.landing_page_url, "pdf"); }
+  for (const l of locs) push(l.landing_page_url, "record");
+  return out;
+}
+// Best web link for a work without a DOI: an open-access copy first, then the landing page.
+function oaLink(w) {
+  const locs = [w.best_oa_location, w.primary_location, ...(w.locations || [])].filter(Boolean);
+  const c = [];
+  for (const k of ["landing_page_url", "pdf_url"]) for (const l of locs) { const u = l[k]; if (u && /^https?:\/\//.test(u) && !/doi\.org\/|orcid\.org\//i.test(u)) c.push(u); }
+  return c.find(u => /^https:/.test(u)) || c[0] || "";
+}
+const oaKey = () => state.oaKey ? "&api_key=" + enc(state.oaKey) : "";
+async function openAlexTitleSearch(title) {
+  const t = cleanQ(title); if (t.split(" ").length < 2) return [];
+  const j = await getJSON("https://api.openalex.org/works?per-page=8&filter=title.search:" + enc(t) + mailto("&") + oaKey(), "openalex", 250);
+  return (j.results || []).map(fromOpenAlex).filter(it => it.DOI || it._url);
+}
+async function openAlexSearch(q) { const j = await getJSON("https://api.openalex.org/works?per-page=8&search=" + enc(cleanQ(q)) + mailto("&") + oaKey(), "openalex", 250); return (j.results || []).map(fromOpenAlex).filter(it => it.DOI || it._url); }
+
+function crType(t) {
+  if (t === "journal-article") return "JOUR";
+  if (/^book-(chapter|section|part)$/.test(t)) return "CHAP";
+  if (/^(book|monograph|edited-book|reference-book|book-set)$/.test(t)) return "BOOK";
+  if (/^report/.test(t)) return "RPRT";
+  if (t === "dissertation") return "THES";
+  if (t === "proceedings-article") return "CONF";
+  return "GEN";
+}
+const yearOf = it => { const d = it.issued || it["published-print"] || it["published-online"]; const y = d && d["date-parts"] && d["date-parts"][0] && d["date-parts"][0][0]; return y || null; };
+const crTitle = it => stripTags(((it.title || [])[0] || "") + ((it.subtitle || [])[0] ? ": " + it.subtitle[0] : "")).replace(/^(?:chapter|ch\.|hoofdstuk)\s*[\divxlc]+\s*[.:–-]\s*/i, "");
+const mapNames = arr => (arr || []).map(a => ({ family: a.family || a.name || "", given: a.given || "" })).filter(a => a.family);
+function pickIsbn(list) {
+  const c = (list || []).map(x => String(x).replace(/[^0-9Xx]/g, "")).filter(x => x.length === 13 || x.length === 10);
+  return c.find(x => /^97[89]/.test(x)) || c[0] || "";
+}
+
+function judge(it, e) {
+  const rawN = norm([e.raw, e.title, e.container].join(" "));
+  const ct = crType(it.type);
+  const title = crTitle(it);
+  const cov = coverage(title, rawN);
+  const candN = norm(title + " " + ((it["container-title"] || [])[0] || ""));
+  const ours = toks(e.title), oursC = toks(e.container);
+  const revT = ours.length ? ours.filter(w => candN.includes(w)).length / ours.length : cov;
+  const revC = oursC.length ? oursC.filter(w => candN.includes(w)).length / oursC.length : 0;
+  const rev = e.type === "CHAP" ? Math.max(revT, ct === "BOOK" ? revC : 0) : revT;
+  const fams = mapNames(it.author || it.editor).map(a => norm(a.family).split(/\s+/).pop()).filter(f => f.length > 1);
+  const authorOk = fams.some(f => rawN.includes(f));
+  const y = yearOf(it);
+  const bookish = ct === "BOOK" || ct === "CHAP";
+  const yd = (!e.year || !y) ? 0 : Math.abs(+e.year - y);
+  // A book review repeats the book's title and author in its own title; never match it to the book itself.
+  const isReview = /\b\d{2,4}\s*pp\.?\s*\.?$|\bbook review\b|^review of\b|\bby\s+\p{Lu}[\p{L}.'’-]+(?:\s+\p{Lu}[\p{L}.'’-]+){0,3}\s*[,.]?\s*(?:\p{Lu}[\p{L}]+\s*:\s*)?[\p{L} ]*(?:press|publishers?|books)\b/iu.test(title);
+  if (isReview || (e.type === "BOOK" && ct === "JOUR")) return { sure: false, maybe: false, edition: false, score: 0 };
+  const mtSrc = e.type === "CHAP" && ct === "BOOK" ? e.container : e.title;
+  const mtCov = toks(mainTitle(mtSrc)).length ? coverage(mainTitle(mtSrc), candN) : 1;
+  const strong = cov >= 0.75 && rev >= 0.6 && authorOk && mtCov >= 0.8;
+  const sure = strong && (yd <= 1 || (!it.DOI && it._url && yd <= 3));
+  const edition = !sure && strong && bookish && yd <= 30;
+  const maybe = !sure && mtCov >= 0.5 && (edition || (cov >= 0.5 && rev >= 0.4 && (authorOk || rev >= 0.8)));
+  let bonus = 0; if (ct === e.type) bonus = 0.15; if (e.type === "CHAP" && ct === "BOOK") bonus = 0.05;
+  return { sure, maybe, edition, score: cov + rev + (authorOk ? 0.5 : 0) + bonus - (yd > 1 ? 0.3 : 0) };
+}
+
+function applyCrossref(e, it) {
+  const ct = crType(it.type);
+  const title = crTitle(it);
+  const src = it._src || "Crossref";
+  if (e.type === "CHAP" && ct === "BOOK") {
+    e.container = title;
+    e.publisher = it.publisher || e.publisher;
+    e.isbn = pickIsbn(it.ISBN) || e.isbn;
+    e.doi = it.DOI;
+    if (!e.authors.length) e.authors = mapNames(it.author);
+    if (it.editor) e.editors = mapNames(it.editor);
+    e.msg = "Book found in " + src + " (no separate DOI for this chapter).";
+    return;
+  }
+  if (!it.DOI) {
+    if (it._url && !it._links) { e.url = it._url; e.linkKind = "record"; }
+    if (!e.year && yearOf(it)) e.year = String(yearOf(it));
+    if (!e.authors.length && it.author && it.author.length) e.authors = mapNames(it.author);
+    if (!e.publisher && it.publisher) e.publisher = it.publisher;
+    if (e.type === "GEN" || e.type === "JOUR" && !e.container) e.type = /paper|report|brief/i.test(e.series + " " + e.title) ? "RPRT" : "ELEC";
+    e.msg = linkMsg(e, src, yearOf(it));
+    return;
+  }
+  if (ct !== "GEN") e.type = ct;
+  e.title = title || e.title;
+  if (it.author && it.author.length) e.authors = mapNames(it.author);
+  if (it.editor && it.editor.length) e.editors = mapNames(it.editor);
+  const ctTitle = stripTags((it["container-title"] || [])[0] || "");
+  if (ct !== "BOOK" && ctTitle && !(e.type === "CHAP" && coverage(title, norm(ctTitle)) > 0.8)) e.container = ctTitle;
+  const y = yearOf(it); if (y) e.year = String(y);
+  e.volume = it.volume || e.volume; e.issue = it.issue || e.issue;
+  if (it.page) { const [a, b] = it.page.split(/[-–]/); e.sp = a || ""; e.ep = b || ""; }
+  e.publisher = it.publisher || e.publisher; e.place = it["publisher-location"] || e.place;
+  e.isbn = pickIsbn(it.ISBN) || e.isbn; e.doi = it.DOI;
+  e.msg = "Matched in " + src + ".";
+}
+
+// Internet Archive: an archived copy of a PDF whose original address may no longer work.
+async function waybackCopy(url) {
+  const j = await getJSON("https://archive.org/wayback/available?url=" + enc(url), "wayback", 400);
+  const c = j && j.archived_snapshots && j.archived_snapshots.closest;
+  return c && c.available && String(c.status) === "200" ? c.url.replace(/^http:/, "https:") : "";
+}
+// Pick the most useful link: open full text, then an archived copy of a PDF, then a record page.
+async function resolveLink(e, it) {
+  const links = it._links || [];
+  const pick = kind => links.find(l => l.kind === kind && /^https:/.test(l.url)) || links.find(l => l.kind === kind);
+  let l = pick("full") || pick("oa-page");
+  if (l) { e.url = l.url; e.linkKind = "full"; return; }
+  for (const p of links.filter(x => x.kind === "pdf").slice(0, 3)) {
+    let w = ""; try { w = await waybackCopy(p.url); } catch (err) {}
+    if (w) { e.url = w; e.linkKind = "archived"; return; }
+  }
+  l = pick("pdf");
+  if (l) { e.url = l.url; e.linkKind = "pdf"; return; }
+  l = pick("record");
+  if (l) { e.url = l.url; e.linkKind = "record"; }
+}
+const LINK_KIND = {
+  full: "Open full text",
+  archived: "Archived copy of the full text (Internet Archive)",
+  pdf: "PDF link (not checked; it may no longer work)",
+  record: "Record page (may not include the full text)",
+  user: "Link added by you",
+  syllabus: "Link from the syllabus"
+};
+function linkMsg(e, src, oy) {
+  const later = oy && e.year && String(oy) !== e.year ? " " + src + " lists it as " + oy + ", so it may be a later version." : "";
+  const base = "Found in " + src + ". It has no DOI or ISBN (common for working papers and reports).";
+  if (e.linkKind === "full") return base + " Linked to an open full-text copy." + later;
+  if (e.linkKind === "archived") return base + " Its original PDF address no longer works reliably, so it's linked to the copy saved by the Internet Archive." + later;
+  if (e.linkKind === "pdf") return base + " Linked to a PDF that couldn't be checked; open it to make sure it works." + later;
+  return base + " The only link found is a record page, which may not have the full text. If you know a better link, paste it below." + later;
+}
+
+const mainTitle = t => (t || "").split(/:\s|\.\s/)[0];
+async function googleBooks(title, author, year) {
+  const main = mainTitle(title);
+  const j = await getJSON("https://www.googleapis.com/books/v1/volumes?maxResults=10&printType=books&q=" + enc("intitle:" + main + (author ? " inauthor:" + author : "")), "gbooks", 500);
+  let best = null;
+  for (const v of j.items || []) {
+    const vi = v.volumeInfo || {};
+    if (coverage(main, norm(vi.title)) < 0.8) continue;
+    if (author && !(vi.authors || []).some(a => norm(a).includes(norm(author)))) continue;
+    const isbn = pickIsbn((vi.industryIdentifiers || []).filter(x => /ISBN/.test(x.type)).map(x => x.identifier));
+    if (!isbn) continue;
+    const y = parseInt(vi.publishedDate, 10);
+    const score = (year && y && Math.abs(y - +year) <= 1 ? 2 : 0) + coverage(title, norm((vi.title || "") + " " + (vi.subtitle || "")));
+    if (!best || score > best.score) best = { isbn, publisher: vi.publisher || "", source: "Google Books", score };
+  }
+  return best;
+}
+async function openLibrary(title, author) {
+  const main = mainTitle(title);
+  const j = await getJSON("https://openlibrary.org/search.json?limit=6&fields=title,author_name,isbn,publisher&title=" + enc(main) + (author ? "&author=" + enc(author) : ""), "openlibrary", 500);
+  for (const d of j.docs || []) {
+    if (coverage(main, norm(d.title)) < 0.8) continue;
+    const isbn = pickIsbn(d.isbn); if (isbn) return { isbn, publisher: (d.publisher || [])[0] || "", source: "Open Library" };
+  }
+  return null;
+}
+
+function fieldQuery(e) {
+  return [e.authors.map(a => a.family).join(" "), e.year, e.title, e.container, e.publisher].filter(Boolean).join(" ");
+}
+
+async function lookup(e, useFields) {
+  e.status = "busy"; e.suggestion = null; e.msg = "Searching…"; paint(e);
+  const failed = [];
+  const tryIt = async (name, fn) => { try { return await fn(); } catch (err) { if (!err.final && !failed.includes(name)) failed.push(name); return null; } };
+  if (e.doi) {
+    const it = await tryIt("Crossref", () => crossrefByDoi(e.doi));
+    if (it) { applyCrossref(e, it); e.msg = "DOI checked in Crossref."; } else e.msg = "DOI kept as written (it couldn't be checked just now).";
+  } else if (e.isbn) {
+    e.msg = "ISBN taken from the syllabus.";
+  } else {
+    const q = useFields ? fieldQuery(e) : (e.query || e.raw);
+    let maybe = null;
+    const consider = items => {
+      const ranked = (items || []).map(it => ({ it, j: judge(it, e) })).sort((a, b) => b.j.score - a.j.score);
+      const s = ranked.find(r => r.j.sure); if (s) return s.it;
+      const m = ranked.find(r => r.j.maybe); if (m && !maybe) { m.it._edition = m.j.edition; maybe = m.it; }
+      return null;
+    };
+    if (e.type !== "ELEC" || !e.url) {
+      let hit = consider(await tryIt("Crossref", () => crossrefSearch(q)));
+      if (!hit && e.title) hit = consider(await tryIt("OpenAlex", () => openAlexTitleSearch(e.title)));
+      if (!hit) hit = consider(await tryIt("OpenAlex", () => openAlexSearch(q)));
+      if (hit) {
+        applyCrossref(e, hit);
+        if (!hit.DOI && hit._links) { e.msg = "Looking for the full text…"; paint(e); await resolveLink(e, hit); e.msg = linkMsg(e, hit._src || "OpenAlex", yearOf(hit)); }
+      } else if (maybe) e.suggestion = maybe;
+    }
+    if (!e.doi && !e.isbn && (e.type === "BOOK" || e.type === "CHAP")) {
+      const bt = e.type === "CHAP" ? e.container : e.title;
+      const au = e.type === "BOOK" || !e.editors.length ? (e.authors[0] || {}).family : (e.editors[0] || {}).family;
+      if (bt) {
+        let r = await tryIt("Google Books", () => googleBooks(bt, au, e.year));
+        if (!r) r = await tryIt("Open Library", () => openLibrary(bt, au));
+        if (r) { e.isbn = r.isbn; if (!e.publisher) e.publisher = r.publisher; e.msg = "ISBN found in " + r.source + ". Check it matches the edition you use."; }
+      }
+    }
+    if (!e.doi && !e.isbn) {
+      const canvas = e.notes.some(n => /pdf|canvas/i.test(n));
+      if (e.url && /^Found in /.test(e.msg)) {
+        // link found through OpenAlex; keep its message
+      } else if (e.url) {
+        if (e.type === "GEN" || e.type === "JOUR") e.type = "ELEC";
+        e.msg = e.suggestion ? "Not sure about the match below. Without it, this imports as a web link." : (e.type === "RPRT" ? "No DOI found. Imports as a report with its web link." : "No DOI or ISBN. Imports as a web page.");
+      } else if (e.suggestion) {
+        e.msg = "Possible match found. Check it below, or paste an identifier under Edit.";
+      } else if (failed.length) {
+        e.msg = failed.join(" and ") + (failed.length > 1 ? " didn't" : " didn't") + " respond just now.";
+      } else {
+        e.msg = "No DOI, ISBN or web link found." + (e.type === "RPRT" || e.type === "THES" || e.type === "GEN" ? " Working papers, reports and theses often have none." : "") + " If you find it online, paste the link below." + (state.exp.scholarFallback ? " Otherwise students get a Google Scholar search for it." : "") + (canvas ? " Since it's a PDF in Canvas, you can also upload the file to this item in VU Reading Lists." : "");
+      }
+    }
+  }
+  if (e.doi && !e.ftUrl && state.email) {
+    try {
+      const u = await getJSON("https://api.unpaywall.org/v2/" + enc(e.doi) + "?email=" + enc(state.email), "unpaywall", 300);
+      const b = u && u.best_oa_location;
+      if (b && (b.url_for_pdf || b.url_for_landing_page)) { e.ftUrl = b.url_for_pdf || b.url_for_landing_page; e.msg += " A free full-text copy was found (Unpaywall) and added as a second link."; }
+    } catch (err) {}
+  }
+  if (failed.length && !e.doi && !e.isbn && !e.suggestion) e.msg = (e.url ? e.msg + " " : "") + "Couldn't reach " + failed.join(" and ") + ". These free services limit how many searches they accept per minute; use Search again in a minute.";
+  e.status = statusOf(e); paint(e); summarize();
+}
+function statusOf(e) { if (e.suggestion && !e.doi && !e.isbn) return "check"; if (e.doi) return "doi"; if (e.isbn) return "isbn"; if (e.url) return "web"; return "check"; }
+
+async function runQueue(list, useFields) {
+  state.total += list.length; summarize();
+  const q = list.slice(); const worker = async () => { while (q.length) { const e = q.shift(); state.running++; await lookup(e, useFields); state.running--; state.done++; summarize(); } };
+  await Promise.all([worker(), worker()]);
+}
+
+// ---------- RIS ----------
+const TYPES = [["JOUR", "Journal article"], ["CHAP", "Book chapter"], ["BOOK", "Book"], ["ELEC", "Web page"], ["RPRT", "Report"], ["THES", "Thesis"], ["CONF", "Conference paper"], ["GEN", "Document"]];
+const typeLabel = t => (TYPES.find(x => x[0] === t) || [, "Document"])[1];
+function sectionTitle(id) { const s = state.sections.find(x => x.id === id); return s ? s.title : ""; }
+// Field use follows Talis Aspire's "Mapping RIS fields to Talis Aspire":
+// KW, JO, T3, CY and AB are ignored by Talis; GEN and unknown TY values make Talis reject the record,
+// so documents are written as ABST (Talis type "Document"). N1 becomes the student-visible Study Note,
+// U1 sets the importance level, A2 holds book editors for chapters.
+const RIS_TYPE = { GEN: "ABST" };
+const impLevel = e => e.importance || state.exp.defaultImp;
+function importanceFor(e) { const l = impLevel(e); return l && state.exp.writeImp ? (state.exp.labels[l] || "").trim() : ""; }
+function noteFor(e) { const l = impLevel(e); return [state.exp.weekInNote ? sectionTitle(e.section) : "", l && !importanceFor(e) ? IMP_NAME[l] : "", ...e.notes].filter(Boolean).join(" · "); }
+function toRIS(e) {
+  const L = []; const add = (k, v) => { if (v !== undefined && v !== null && String(v).trim() !== "") L.push(k + "  - " + String(v).replace(/\s+/g, " ").trim()); };
+  const name = a => a.given ? a.family + ", " + a.given : a.family;
+  add("TY", RIS_TYPE[e.type] || e.type);
+  e.authors.forEach(a => add("AU", name(a)));
+  if (e.type === "CHAP") e.editors.forEach(a => add("A2", name(a)));
+  else if (e.type === "BOOK") e.editors.forEach(a => add("ED", name(a)));
+  add("TI", e.title);
+  if (e.type === "JOUR" || e.type === "CHAP") add("T2", e.container);
+  add("PY", e.year); add("VL", e.volume); add("IS", e.issue); add("SP", e.sp); add("EP", e.ep);
+  add("PB", e.publisher); add("SN", e.isbn); add("DO", e.doi);
+  add("UR", e.url || (e.doi ? "https://doi.org/" + e.doi : "") || (usesScholar(e) ? scholarSearchUrl(e) : ""));
+  if (e.ftUrl && e.ftUrl !== e.url) add("UR", e.ftUrl);
+  add("U1", importanceFor(e));
+  add("N1", noteFor(e));
+  L.push("ER  - ");
+  return L.join("\r\n");
+}
+// Section headings become Talis "paragraphs" (TY - NOTE, a Talis addition to RIS) placed before each section's readings.
+function headingRIS(title) { return ["TY  - NOTE", "N1  - " + String(title).replace(/\s+/g, " ").trim(), "ER  - "].join("\r\n"); }
+function buildRIS(list) {
+  const out = []; let last = null;
+  for (const e of list) {
+    if (state.exp.headings && e.section !== last) { const t = sectionTitle(e.section); if (t) out.push(headingRIS(t)); last = e.section; }
+    out.push(toRIS(e));
+  }
+  return out.join("\r\n\r\n") + "\r\n";
+}
+function scholarSearchUrl(e) {
+  const full = (e.title || "").replace(/["“”]/g, "").trim();
+  const main = mainTitle(full).trim();
+  const t = main.split(/\s+/).length >= 2 ? main : full;
+  const a = (e.authors[0] || {}).family || "";
+  return "https://scholar.google.com/scholar?q=" + enc((t ? '"' + t + '"' : "") + (a ? " " + a : ""));
+}
+const usesScholar = e => state.exp.scholarFallback && !e.url && !e.doi && !e.isbn && !!e.title;
+// RIS-END
+
+// ---------- UI ----------
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 2200); }
+const STATUS_LABEL = { doi: "DOI", isbn: "ISBN", web: "Web link", check: "Needs a look", busy: "Searching", new: "Not checked" };
+const namesStr = arr => arr.map(a => a.given ? a.family + ", " + a.given : a.family).join("; ");
+const parseNameField = s => s.split(";").map(x => x.trim()).filter(Boolean).map(x => { const i = x.indexOf(","); return i > 0 ? { family: x.slice(0, i).trim(), given: x.slice(i + 1).trim() } : { family: x, given: "" }; });
+function shortAuthors(arr) { if (!arr.length) return ""; const f = arr.map(a => a.family); return f.length > 3 ? f[0] + " et al." : f.length === 1 ? f[0] : f.slice(0, -1).join(", ") + " & " + f[f.length - 1]; }
+function citeHTML(e) {
+  const pages = e.sp ? (e.ep ? e.sp + "–" + e.ep : e.sp) : "";
+  let c = "";
+  const au = shortAuthors(e.authors);
+  if (au) c += esc(au) + " ";
+  if (e.year) c += "(" + esc(e.year) + "). ";
+  c += '<span class="ttl">' + esc(e.title || "Untitled") + "</span>. ";
+  if (e.type === "JOUR" && e.container) c += "<i>" + esc(e.container) + "</i>" + (e.volume ? " " + esc(e.volume) : "") + (e.issue ? "(" + esc(e.issue) + ")" : "") + (pages ? ", " + pages : "") + ". ";
+  else if (e.type === "CHAP" && e.container) c += "In " + (e.editors.length ? esc(shortAuthors(e.editors)) + " (Eds.), " : "") + "<i>" + esc(e.container) + "</i>" + (pages ? " (pp. " + pages + ")" : "") + ". ";
+  else if (e.type === "RPRT" && (e.series || e.container)) c += esc(e.series || e.container) + ". ";
+  if (e.publisher && e.type !== "JOUR") c += esc(e.publisher) + ".";
+  return c;
+}
+function idsHTML(e) {
+  const p = [];
+  if (e.doi) p.push('<span>DOI <a href="https://doi.org/' + esc(e.doi) + '" target="_blank" rel="noopener"><b>' + esc(e.doi) + "</b></a></span>");
+  if (e.isbn) p.push("<span>ISBN <b>" + esc(e.isbn) + "</b></span>");
+  const short = u => esc(u.replace(/^https?:\/\//, "").slice(0, 60)) + (u.length > 68 ? "…" : "");
+  if (e.url) p.push("<span>" + esc(LINK_KIND[e.linkKind] || "Link") + ' <a href="' + esc(e.url) + '" target="_blank" rel="noopener">' + short(e.url) + "</a></span>");
+  if (usesScholar(e)) p.push('<span>Google Scholar search (added because no link was found) <a href="' + esc(scholarSearchUrl(e)) + '" target="_blank" rel="noopener">' + short(scholarSearchUrl(e)) + "</a></span>");
+  if (e.ftUrl && e.ftUrl !== e.url) p.push('<span>Free full text <a href="' + esc(e.ftUrl) + '" target="_blank" rel="noopener">' + short(e.ftUrl) + "</a></span>");
+  const n = e.notes.join(" · ");
+  if (n) p.push("<span>Note <b>" + esc(n) + "</b></span>");
+  return p.join("");
+}
+function suggHTML(e) {
+  const it = e.suggestion; if (!it) return "";
+  const au = shortAuthors(mapNames(it.author || it.editor));
+  return '<div class="sugg"><div><strong>' + (it._edition ? "Possibly a different edition (" + esc(yearOf(it)) + "):" : "Possible match:") + '</strong> ' + esc(au) + (yearOf(it) ? " (" + yearOf(it) + "). " : ". ") + "<em>" + esc(crTitle(it)) + "</em>" + ((it["container-title"] || [])[0] ? ". " + esc(stripTags(it["container-title"][0])) : "") + ' <span class="muted">· ' + esc(typeLabel(crType(it.type))) + " · DOI " + esc(it.DOI) + " · from " + esc(it._src || "Crossref") + '</span></div><div class="row"><button class="btn sm" data-act="accept" type="button">Use this match</button><button class="btn sm" data-act="reject" type="button">Not this one</button></div></div>';
+}
+function scholarLinks(e) {
+  const q = enc([shortAuthors(e.authors), e.title].filter(Boolean).join(" "));
+  return '<a href="https://scholar.google.com/scholar?q=' + q + '" target="_blank" rel="noopener">Google Scholar</a> · <a href="https://search.worldcat.org/search?q=' + q + '" target="_blank" rel="noopener">WorldCat</a>';
+}
+function containerLabel(t) { return t === "JOUR" ? "Journal" : t === "CHAP" ? "Book title" : t === "RPRT" ? "Series / report number" : t === "ELEC" ? "Website" : "Published in"; }
+function itemHTML(e, isFirst) {
+  const opts = TYPES.map(([v, l]) => '<option value="' + v + '"' + (v === e.type ? " selected" : "") + ">" + l + "</option>").join("");
+  const f = (k, label, val, cls) => '<label class="fld' + (cls ? " " + cls : "") + '" for="' + e.id + "-" + k + '">' + label + '<input type="text" id="' + e.id + "-" + k + '" data-f="' + k + '" value="' + esc(val) + '"></label>';
+  return '<article class="item st-' + e.status + '" id="' + e.id + '" data-id="' + e.id + '">' +
+    '<div class="item-top"><span class="pill">' + STATUS_LABEL[e.status] + '</span>' +
+    '<select data-f="type" aria-label="Type of reading">' + opts + "</select>" +
+    '<select data-f="importance" aria-label="Importance">' + [["", state.exp.defaultImp ? "Default: " + IMP_NAME[state.exp.defaultImp] : "Importance not set"], ["required", "Required reading"], ["recommended", "Recommended reading"], ["optional", "Optional reading"]].map(([v, l]) => '<option value="' + v + '"' + (v === e.importance ? " selected" : "") + ">" + l + "</option>").join("") + "</select>" +
+    '<div class="acts"><button class="btn sm" data-act="edit" type="button" aria-expanded="' + e.editing + '">' + (e.editing ? "Done" : "Edit") + '</button>' +
+    '<button class="btn sm" data-act="search" type="button">Search again</button>' +
+    '<button class="btn sm" data-act="merge" type="button"' + (isFirst ? " disabled" : "") + ' title="Join with the reading above, if one reference was split in two">Merge up</button>' +
+    '<button class="btn sm" data-act="remove" type="button">Remove</button></div></div>' +
+    '<p class="cite">' + citeHTML(e) + "</p>" +
+    '<p class="ids">' + idsHTML(e) + "</p>" +
+    '<p class="msg">' + esc(e.msg) + (e.status === "check" ? " Search: " + scholarLinks(e) : "") + "</p>" +
+    ((e.status === "check" && !e.url && !e.doi && !e.isbn) || (!e.doi && !e.isbn && (e.linkKind === "record" || e.linkKind === "pdf")) ? '<label class="fld quick" for="' + e.id + '-quick">' + (e.url ? "Replace with a better link" : "Paste a link, DOI or ISBN") + '<input type="text" id="' + e.id + '-quick" data-f="quick" placeholder="e.g. a link copied from Google Scholar, the publisher or a library catalogue"></label>' : "") +
+    suggHTML(e) +
+    '<div class="edit"' + (e.editing ? "" : " hidden") + ">" +
+      f("authors", "Authors (Family, Given; …)", namesStr(e.authors), "wide") +
+      f("title", "Title", e.title, "wide") +
+      f("container", containerLabel(e.type), e.type === "RPRT" ? (e.series || e.container) : e.container, "wide") +
+      f("editors", "Editors (Family, Given; …)", namesStr(e.editors)) +
+      f("year", "Year", e.year) + f("volume", "Volume", e.volume) + f("issue", "Issue", e.issue) +
+      f("pages", "Pages", e.sp ? e.sp + (e.ep ? "-" + e.ep : "") : "") +
+      f("publisher", "Publisher / organisation", e.publisher) + f("place", "Place", e.place) +
+      f("doi", "DOI", e.doi) + f("isbn", "ISBN", e.isbn) + f("url", "Web link", e.url, "wide") +
+      f("notes", "Notes for students (separate with ;)", e.notes.join("; "), "wide") +
+      '<label class="fld wide" for="' + e.id + '-raw">Original text<textarea id="' + e.id + '-raw" data-raw>' + esc(e.raw) + '</textarea></label>' +
+      '<div class="row wide"><button class="btn sm" data-act="reread" type="button">Read original text again</button><span class="muted small">Use this after fixing the original text, for example to split off a second reference.</span></div>' +
+    "</div>" +
+    (e.editing ? "" : '<details class="orig"><summary>Original text</summary><p class="raw">' + esc(e.raw) + "</p></details>") +
+    "</article>";
+}
+function paint(e) {
+  const el = document.getElementById(e.id); if (!el) return;
+  const list = state.entries.filter(x => x.section === e.section);
+  el.outerHTML = itemHTML(e, list[0] === e);
+}
+function paintParts(e) {
+  const el = document.getElementById(e.id); if (!el) return;
+  e.status = statusOf(e);
+  el.className = "item st-" + e.status;
+  el.querySelector(".pill").textContent = STATUS_LABEL[e.status];
+  el.querySelector(".cite").innerHTML = citeHTML(e);
+  el.querySelector(".ids").innerHTML = idsHTML(e);
+  summarize();
+}
+function render() {
+  const box = $("#review");
+  box.innerHTML = state.sections.map(s => {
+    const items = state.entries.filter(e => e.section === s.id);
+    return '<div class="section" data-sec="' + s.id + '"><div class="section-head"><input type="text" id="sec-' + s.id + '" data-sec-title="' + s.id + '" value="' + esc(s.title) + '" aria-label="Section name"><button class="btn sm" data-act="add" data-sec="' + s.id + '" type="button">Add a reading</button></div>' +
+      (items.length ? items.map((e, i) => itemHTML(e, i === 0)).join("") : '<p class="muted small">No readings in this section. It will be left out of the file.</p>') + "</div>";
+  }).join("");
+  summarize();
+}
+function summarize() {
+  updateBulk();
+  const c = { doi: 0, isbn: 0, web: 0, check: 0, busy: 0 };
+  state.entries.forEach(e => { c[e.status] = (c[e.status] || 0) + 1; });
+  const n = state.entries.length;
+  $("#summary").innerHTML = '<span class="count">' + n + " readings</span>" +
+    (c.doi ? '<span class="count doi">' + c.doi + " with DOI</span>" : "") +
+    (c.isbn ? '<span class="count isbn">' + c.isbn + " with ISBN</span>" : "") +
+    (c.web ? '<span class="count web">' + c.web + " web links</span>" : "") +
+    (c.check ? '<span class="count check">' + c.check + " need a look</span>" : "") +
+    (c.busy ? '<span class="count">' + c.busy + " searching…</span>" : "");
+  const pct = state.total ? Math.round(100 * state.done / state.total) : 100;
+  $("#progress").style.width = (state.done >= state.total ? 0 : pct) + "%";
+  renderExport();
+}
+function slug(s) { return norm(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "readings"; }
+function renderExport() {
+  const all = state.entries;
+  $("#p-export").hidden = !all.length;
+  const rows = ['<div><strong>All readings</strong><span class="n">' + all.length + ' readings</span><button class="btn primary sm" data-dl="all" type="button">Download .ris</button></div>'];
+  state.sections.forEach(s => {
+    const n = all.filter(e => e.section === s.id).length; if (!n) return;
+    rows.push("<div><span>" + esc(s.title) + '</span><span class="n">' + n + (n === 1 ? " reading" : " readings") + '</span><button class="btn sm" data-dl="' + s.id + '" type="button">Download</button></div>');
+  });
+  $("#files").innerHTML = rows.join("");
+  $("#risPreview").textContent = all.length ? buildRIS(all) : "";
+}
+function download(name, text) {
+  const blob = new Blob([text], { type: "application/x-research-info-systems;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+$("#files").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-dl]"); if (!b) return;
+  const id = b.dataset.dl;
+  if (id === "all") { download("reading-list.ris", buildRIS(state.entries)); toast("Downloaded reading-list.ris"); return; }
+  const s = state.sections.find(x => x.id === id);
+  const name = "reading-list-" + slug(s.title) + ".ris";
+  download(name, buildRIS(state.entries.filter(e => e.section === id))); toast("Downloaded " + name);
+});
+$("#copyRis").addEventListener("click", async () => {
+  const text = buildRIS(state.entries);
+  try { await navigator.clipboard.writeText(text); toast("RIS text copied"); }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($("#risPreview")); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); $("#risPreview").closest("details").open = true; toast("Text selected. Press Ctrl+C or Cmd+C to copy."); }
+});
+
+const byId = id => state.entries.find(e => e.id === id);
+$("#review").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-act]"); if (!b) return;
+  const act = b.dataset.act;
+  if (act === "add") {
+    const e = { id: "e" + (++uid), section: b.dataset.sec, importance: "", raw: "", query: "", type: "JOUR", authors: [], editors: [], title: "", container: "", series: "", year: "", volume: "", issue: "", sp: "", ep: "", publisher: "", place: "", isbn: "", doi: "", url: "", notes: [], status: "check", msg: "Fill in the details, then choose Search again to find the DOI or ISBN.", suggestion: null, editing: true };
+    const idx = state.entries.map(x => x.section).lastIndexOf(b.dataset.sec);
+    state.entries.splice(idx + 1, 0, e); render(); document.getElementById(e.id + "-title")?.focus(); return;
+  }
+  const el = b.closest(".item"); const e = el && byId(el.dataset.id); if (!e) return;
+  if (act === "edit") { e.editing = !e.editing; paint(e); if (e.editing) document.getElementById(e.id + "-authors")?.focus(); }
+  else if (act === "search") { state.total = state.done = 0; runQueue([e], true); }
+  else if (act === "remove") { state.entries = state.entries.filter(x => x !== e); render(); toast("Reading removed"); }
+  else if (act === "merge") {
+    const list = state.entries.filter(x => x.section === e.section); const prev = list[list.indexOf(e) - 1]; if (!prev) return;
+    const merged = extractFields({ section: prev.section, text: prev.raw + " " + e.raw, importance: prev.importance });
+    merged.id = prev.id; Object.assign(prev, merged);
+    state.entries = state.entries.filter(x => x !== e); render();
+    if (state.lookup) { state.total = state.done = 0; runQueue([prev]); }
+  }
+  else if (act === "reread") {
+    const raw = document.getElementById(e.id + "-raw").value.trim(); if (!raw) return;
+    const parsed = parseSyllabus(raw).refs;
+    const fresh = parsed.length ? parsed.map(r => extractFields({ section: e.section, text: r.text, importance: r.importance || e.importance })) : [extractFields({ section: e.section, text: raw, importance: e.importance })];
+    const i = state.entries.indexOf(e); state.entries.splice(i, 1, ...fresh); render();
+    if (state.lookup) { state.total = state.done = 0; runQueue(fresh); }
+  }
+  else if (act === "accept") {
+    const it = e.suggestion; applyCrossref(e, it); e.suggestion = null; e.status = statusOf(e); paint(e); summarize();
+    if (!it.DOI && it._links) { resolveLink(e, it).then(() => { e.msg = linkMsg(e, it._src || "OpenAlex", yearOf(it)); e.status = statusOf(e); paint(e); summarize(); }); }
+  }
+  else if (act === "reject") { e.suggestion = null; e.status = statusOf(e); e.msg = e.url ? "Imports as a web link." : "No identifier. Check the details or paste a DOI or ISBN under Edit."; paint(e); summarize(); }
+});
+$("#review").addEventListener("input", ev => {
+  const t = ev.target;
+  if (t.dataset.secTitle) { const s = state.sections.find(x => x.id === t.dataset.secTitle); if (s) { s.title = t.value; renderExport(); } return; }
+  const el = t.closest(".item"); const e = el && byId(el.dataset.id); if (!e || !t.dataset.f) return;
+  const k = t.dataset.f, v = t.value;
+  if (k === "authors") e.authors = parseNameField(v);
+  else if (k === "editors") e.editors = parseNameField(v);
+  else if (k === "pages") { const m = v.split(/\s*[-–]\s*/); e.sp = m[0] || ""; e.ep = m[1] || ""; }
+  else if (k === "doi") e.doi = findDoi(v) || v.trim();
+  else if (k === "isbn") e.isbn = v.replace(/[^0-9Xx]/g, "").toUpperCase();
+  else if (k === "notes") e.notes = v.split(";").map(x => x.trim()).filter(Boolean);
+  else if (k === "container" && e.type === "RPRT") e.series = v;
+  else if (k === "importance") { e.importance = v; renderExport(); updateBulk(); return; }
+  else if (k === "quick") {
+    const val = v.trim(); if (!val) return;
+    const d = findDoi(val), digits = val.replace(/[^0-9Xx]/g, "");
+    if (d) e.doi = d;
+    else if (/^https?:\/\//i.test(val)) { e.url = deproxy(val); e.linkKind = "user"; }
+    else if (/^[0-9Xx\s-]+$/.test(val) && (digits.length === 10 || digits.length === 13)) e.isbn = digits.toUpperCase();
+    else return;
+    e.suggestion = null;
+    e.msg = d ? "DOI added by you." : e.url ? "Link added by you. Imports with this web link." : "ISBN added by you.";
+    clearTimeout(e._qt); e._qt = setTimeout(() => { e.status = statusOf(e); paint(e); summarize(); }, 600);
+    return;
+  }
+  else if (k === "type") { e.type = v; paint(e); summarize(); return; }
+  else { e[k] = v; if (k === "url") e.linkKind = v ? "user" : ""; }
+  if (k === "doi" || k === "isbn" || k === "url") e.suggestion = null;
+  paintParts(e);
+});
+$("#review").addEventListener("change", ev => { const t = ev.target; if (t.dataset.f === "importance" || t.dataset.f === "type") t.dispatchEvent(new Event("input", { bubbles: true })); });
+// import settings
+function readExp() {
+  state.exp.weekInNote = $("#weekInNote").checked;
+  state.exp.scholarFallback = $("#scholarFallback").checked;
+  state.exp.headings = $("#headings").checked;
+  state.exp.writeImp = $("#writeImp").checked;
+  state.exp.defaultImp = "";
+  state.exp.labels = { required: $("#labRequired").value, recommended: $("#labRecommended").value, optional: $("#labOptional").value };
+  try { localStorage.setItem("s2r-exp", JSON.stringify(state.exp)); } catch (e) {}
+  const prevDefault = readExp.lastDefault; readExp.lastDefault = state.exp.defaultImp;
+  const prevScholar = readExp.lastScholar; readExp.lastScholar = state.exp.scholarFallback;
+  if (state.entries.length && ((prevDefault !== undefined && prevDefault !== state.exp.defaultImp) || (prevScholar !== undefined && prevScholar !== state.exp.scholarFallback))) render(); else renderExport();
+}
+try {
+  const v = JSON.parse(localStorage.getItem("s2r-exp") || "null");
+  if (v && v.labels) {
+    $("#weekInNote").checked = v.weekInNote !== false; $("#scholarFallback").checked = v.scholarFallback !== false; $("#headings").checked = v.headings !== false; $("#writeImp").checked = v.writeImp !== false; 
+    $("#labRequired").value = v.labels.required ?? IMP_NAME.required; $("#labRecommended").value = v.labels.recommended ?? IMP_NAME.recommended; $("#labOptional").value = (!v.labels.optional || v.labels.optional === "Optional") ? IMP_NAME.optional : v.labels.optional;
+  }
+} catch (e) {}
+["weekInNote", "headings", "scholarFallback", "writeImp", "labRequired", "labRecommended", "labOptional"].forEach(id => { $("#" + id).addEventListener("input", readExp); $("#" + id).addEventListener("change", readExp); });
+readExp();
+
+// README overlay
+const readme = $("#readmeOverlay");
+function openReadme(ev) { if (ev) ev.preventDefault(); readme.hidden = false; $("#readmeClose").focus(); }
+function closeReadme() { readme.hidden = true; $("#readmeLink").focus(); }
+$("#readmeLink").addEventListener("click", openReadme);
+$("#readmeClose").addEventListener("click", closeReadme);
+readme.addEventListener("click", ev => { if (ev.target === readme) closeReadme(); });
+document.addEventListener("keydown", ev => { if (ev.key === "Escape" && !readme.hidden) closeReadme(); });
+
+function updateBulk() {
+  const n = state.entries.filter(e => !e.importance).length;
+  $("#bulkImp").hidden = !n;
+  $("#bulkCount").textContent = n === 1 ? "1 reading has no importance yet:" : n + " readings have no importance yet:";
+}
+$("#bulkApply").addEventListener("click", () => {
+  const level = $("#bulkLevel").value;
+  const list = state.entries.filter(e => !e.importance);
+  if (!list.length) return;
+  list.forEach(e => { e.importance = level; });
+  render();
+  toast("Set " + list.length + (list.length === 1 ? " reading" : " readings") + " to " + IMP_NAME[level]);
+});
+
+$("#retryAll").addEventListener("click", () => {
+  state.email = $("#email").value.trim(); state.oaKey = $("#oaKey").value.trim();
+  const list = state.entries.filter(e => e.status === "check");
+  if (!list.length) { toast("No amber readings to search for"); return; }
+  state.total = state.done = 0; runQueue(list);
+});
+$("#onlyCheck").addEventListener("change", ev => $("#review").classList.toggle("hidden-ok", ev.target.checked));
+
+// input side
+const src = $("#src");
+function loadExample() { src.value = $("#sample").textContent.trim(); $("#exampleNote").hidden = false; }
+$("#loadExample").addEventListener("click", () => { loadExample(); showTab("paste"); });
+$("#clearText").addEventListener("click", () => { src.value = ""; $("#exampleNote").hidden = true; showTab("paste"); src.focus(); });
+src.addEventListener("input", () => { $("#exampleNote").hidden = true; });
+function showTab(which) {
+  $("#tab-paste").setAttribute("aria-selected", which === "paste"); $("#tab-upload").setAttribute("aria-selected", which === "upload");
+  $("#pane-paste").hidden = which !== "paste"; $("#pane-upload").hidden = which !== "upload";
+}
+$("#tab-paste").addEventListener("click", () => showTab("paste"));
+$("#tab-upload").addEventListener("click", () => showTab("upload"));
+
+async function readFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".docx")) {
+    if (!window.mammoth) throw new Error("the Word reader could not load. Check your internet connection");
+    const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() }); return r.value;
+  }
+  if (name.endsWith(".pdf")) {
+    if (!window.pdfjsLib) throw new Error("the PDF reader could not load. Check your internet connection");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    let out = "";
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const tc = await (await pdf.getPage(p)).getTextContent();
+      let lastY = null;
+      for (const it of tc.items) {
+        const y = it.transform ? Math.round(it.transform[5]) : null;
+        if (lastY !== null && y !== null && Math.abs(y - lastY) > 2 && !out.endsWith("\n")) out += "\n";
+        out += it.str; if (it.hasEOL) out += "\n"; lastY = y;
+      }
+      out += "\n";
+    }
+    return out;
+  }
+  if (name.endsWith(".doc")) throw new Error("old .doc files can't be read. Save it as .docx or PDF first");
+  return await file.text();
+}
+async function handleFile(file) {
+  const st = $("#fileStatus"); st.textContent = "Reading " + file.name + "…";
+  try {
+    const text = await readFile(file);
+    src.value = text.trim(); $("#exampleNote").hidden = true;
+    st.textContent = "Read " + file.name + ". The text is in the Paste tab if you want to trim it.";
+    start();
+  } catch (err) { st.textContent = "Couldn't read " + file.name + ": " + err.message + "."; }
+}
+$("#file").addEventListener("change", ev => { if (ev.target.files[0]) handleFile(ev.target.files[0]); });
+const drop = $("#drop");
+["dragenter", "dragover"].forEach(t => drop.addEventListener(t, ev => { ev.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(t => drop.addEventListener(t, ev => { ev.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", ev => { const f = ev.dataTransfer.files[0]; if (f) handleFile(f); });
+
+function start() {
+  const text = src.value.trim();
+  if (!text) { $("#goNote").textContent = "Paste a syllabus or upload a file first."; return; }
+  state.email = $("#email").value.trim(); state.lookup = $("#doLookup").checked; state.oaKey = $("#oaKey").value.trim();
+  try { localStorage.setItem("s2r-email", state.email); localStorage.setItem("s2r-oakey", state.oaKey); } catch (e) {}
+  const { sections, refs } = parseSyllabus(text);
+  if (!refs.length) { $("#goNote").textContent = "No references found. Check that the text includes the reading list."; return; }
+  state.sections = sections; state.entries = refs.map(extractFields);
+  state.entries.forEach(e => { e.status = state.lookup ? "busy" : statusOf(e); e.msg = state.lookup ? "Waiting to search…" : ""; });
+  $("#goNote").textContent = "Found " + refs.length + " readings in " + sections.length + " sections.";
+  $("#p-review").hidden = false;
+  document.querySelectorAll("#steps li").forEach(li => li.classList.toggle("on", +li.dataset.s <= 3));
+  render();
+  $("#p-review").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  if (state.lookup) { state.total = state.done = 0; runQueue(state.entries.slice()); }
+}
+$("#go").addEventListener("click", start);
+try { $("#email").value = localStorage.getItem("s2r-email") || ""; $("#oaKey").value = localStorage.getItem("s2r-oakey") || ""; } catch (e) {}
+</script>
+</body>
+</html>
